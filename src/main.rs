@@ -1,4 +1,6 @@
 #![feature(lazy_cell)]
+#![feature(adt_const_params)]
+#[allow(incomplete_features)]
 extern crate core;
 
 use std::cell::LazyCell;
@@ -22,6 +24,12 @@ pub mod mojang;
 pub mod meta;
 
 #[derive(Debug)]
+pub struct RequestContext {
+    redis_client: Obscure<redis::aio::ConnectionManager, "ConnectionManager">,
+    request: Request<Body>,
+}
+
+#[derive(Debug)]
 pub struct GlobalApplicationContext {
     client: Client<HttpsConnector<HttpConnector>>,
     hypixel_token: Obscure<String>,
@@ -30,7 +38,7 @@ pub struct GlobalApplicationContext {
     allow_anonymous: bool,
     // Use sha384 to prevent against length extension attacks
     key: Hmac<sha2::Sha384>,
-
+    redis_url: Obscure<String>,
 }
 
 fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Body>> {
@@ -39,7 +47,7 @@ fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Bod
         .body(format!("{} {}", status_code, error_text).into())?);
 }
 
-async fn respond_to_meta(req: Request<Body>, meta_path: &str) -> anyhow::Result<Response<Body>> {
+async fn respond_to_meta(req: RequestContext, meta_path: &str) -> anyhow::Result<Response<Body>> {
     let (save, principal) = require_login!(req);
     let response = if meta_path == "principal" {
         Response::builder()
@@ -51,8 +59,8 @@ async fn respond_to_meta(req: Request<Body>, meta_path: &str) -> anyhow::Result<
     return save.save_to(response);
 }
 
-async fn respond_to(req: Request<Body>) -> anyhow::Result<Response<Body>> {
-    let path = &req.uri().path().to_owned();
+async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body>> {
+    let path = &context.request.uri().path().to_owned();
     if path == "/" {
         return Ok(Response::builder()
             .status(302)
@@ -60,20 +68,20 @@ async fn respond_to(req: Request<Body>) -> anyhow::Result<Response<Body>> {
             .body(Body::empty())?);
     }
     if let Some(meta_path) = path.strip_prefix("/_meta/") {
-        return respond_to_meta(req, meta_path).await;
+        return respond_to_meta(context, meta_path).await;
     }
 
     if let Some(hypixel_path) = path.strip_prefix("/v1/hypixel/") {
-        let (save, _principal) = require_login!(req);
-        if let Some(resp) = hypixel::respond_to(hypixel_path).await? {
+        let (save, _principal) = require_login!(context);
+        if let Some(resp) = hypixel::respond_to(&mut context, hypixel_path).await? {
             return save.save_to(resp);
         }
     }
     return make_error(404, format!("Unknown request path {}", path).as_str());
 }
 
-async fn wrap_error(req: Request<Body>) -> anyhow::Result<Response<Body>> {
-    return match respond_to(req).await {
+async fn wrap_error(context: RequestContext) -> anyhow::Result<Response<Body>> {
+    return match respond_to(context).await {
         Ok(x) => Ok(x),
         Err(e) => {
             let error_id = uuid::Uuid::new_v4();
@@ -91,7 +99,7 @@ fn config_var(name: &str) -> anyhow::Result<String> {
 }
 
 #[allow(non_upper_case_globals)]
-const global_application_config: LazyCell<GlobalApplicationContext> = LazyCell::new(|| {
+static global_application_config: std::sync::LazyLock<GlobalApplicationContext> = std::sync::LazyLock::new(|| {
     init_config().unwrap()
 });
 
@@ -109,6 +117,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     let https = HttpsConnector::new();
     let client = Client::builder()
         .build::<_, Body>(https);
+    let redis_url = config_var("REDIS_URL")?;
     Ok(GlobalApplicationContext {
         client,
         port,
@@ -116,6 +125,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
         rules,
         allow_anonymous,
         key: Hmac::new_from_slice(secret.as_bytes())?,
+        redis_url: Obscure(redis_url),
     })
 }
 
@@ -124,9 +134,17 @@ async fn main() -> anyhow::Result<()> {
     println!("Ursa minor rises above the sky!");
     println!("Launching with configuration: {:#?}", *global_application_config);
     let addr = SocketAddr::from(([127, 0, 0, 1], global_application_config.port));
+    let redis_client = redis::Client::open(global_application_config.redis_url.clone())?;
+    let managed = redis::aio::ConnectionManager::new(redis_client).await?;
     let service = make_service_fn(|_conn| {
+        let client = managed.clone();
         async {
-            Ok::<_, anyhow::Error>(service_fn(move |req| { wrap_error(req) }))
+            Ok::<_, anyhow::Error>(service_fn(move |req| {
+                wrap_error(RequestContext {
+                    redis_client: Obscure(client.clone()),
+                    request: req,
+                })
+            }))
         }
     });
     let server = Server::bind(&addr).serve(service);

@@ -5,7 +5,7 @@ use hyper::{Body, Request, Response};
 use serde::Deserialize;
 use url::Url;
 use uuid::Uuid;
-use crate::{global_application_config, make_error};
+use crate::{global_application_config, make_error, RequestContext};
 use crate::util::UrlForRequest;
 use hyper::body::Buf;
 use hyper::http::HeaderValue;
@@ -48,7 +48,7 @@ macro_rules! require_login {
     };
 }
 
-pub async fn require_login(req: &Request<Body>) -> anyhow::Result<Result<(SaveOnExit, MojangUserPrincipal), Response<Body>>> {
+pub async fn require_login(req: &RequestContext) -> anyhow::Result<Result<(SaveOnExit, MojangUserPrincipal), Response<Body>>> {
     if global_application_config.allow_anonymous {
         return Ok(Ok((SaveOnExit::DontSave, MojangUserPrincipal {
             id: Uuid::from_u128(0),
@@ -71,8 +71,8 @@ pub async fn require_login(req: &Request<Body>) -> anyhow::Result<Result<(SaveOn
     }, it)))
 }
 
-async fn verify_existing_login(req: &Request<Body>) -> anyhow::Result<Option<MojangUserPrincipal>> {
-    let Some(token) = req.headers().get("x-ursa-token").and_then(|it| it.to_str().ok()) else {
+async fn verify_existing_login(req: &RequestContext) -> anyhow::Result<Option<MojangUserPrincipal>> {
+    let Some(token) = req.request.headers().get("x-ursa-token").and_then(|it| it.to_str().ok()) else {
         return Ok(None);
     };
     let mut claims: BTreeMap<String, String> = VerifyWithKey::verify_with_key(token, &global_application_config.key)?;
@@ -92,14 +92,14 @@ async fn verify_existing_login(req: &Request<Body>) -> anyhow::Result<Option<Moj
 }
 
 
-async fn verify_login_attempt(req: &Request<Body>) -> anyhow::Result<Result<MojangUserPrincipal, Response<Body>>> {
+async fn verify_login_attempt(req: &RequestContext) -> anyhow::Result<Result<MojangUserPrincipal, Response<Body>>> {
     // this is a flawed way of doing logins, but I do not want to expend the cryptographical resources
     // to make it less flawed and everyone else does it the same way as well, and this has not become
     // a widely used attack
-    let Some(username) = req.headers().get("x-ursa-username").and_then(|it| it.to_str().ok()) else {
+    let Some(username) = req.request.headers().get("x-ursa-username").and_then(|it| it.to_str().ok()) else {
         return Ok(Err(make_error(400, "Missing username to authenticate")?));
     };
-    let Some(server_id) = req.headers().get("x-ursa-serverid").and_then(|it| it.to_str().ok()) else {
+    let Some(server_id) = req.request.headers().get("x-ursa-serverid").and_then(|it| it.to_str().ok()) else {
         return Ok(Err(make_error(400, "Missing serverid to authenticate")?));
     };
     let mojang_request = Request::builder()

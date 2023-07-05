@@ -42,3 +42,7 @@ version = "*"
 version = "*"
 [dependencies.sha2]
 version = "*"
+
+[dependencies.redis]
+version = "*"
+features = ["aio", "connection-manager", "tokio-comp"]

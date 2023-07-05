@@ -20,15 +20,15 @@ pub fn pure_true() -> bool {
     true
 }
 
-pub struct Obscure<T>(pub T);
+pub struct Obscure<T, const L: &'static str = "..">(pub T);
 
-impl<T> Debug for Obscure<T> {
+impl<T, const L: &'static str> Debug for Obscure<T, L> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str("..")
+        f.write_str(L)
     }
 }
 
-impl<T> Deref for Obscure<T> {
+impl<T, const L: &'static str> Deref for Obscure<T, L> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -36,7 +36,7 @@ impl<T> Deref for Obscure<T> {
     }
 }
 
-impl<T> DerefMut for Obscure<T> {
+impl<T, const L: &'static str> DerefMut for Obscure<T, L> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
