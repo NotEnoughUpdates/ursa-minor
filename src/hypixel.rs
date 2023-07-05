@@ -34,6 +34,9 @@ pub async fn respond_to(arc: Arc<Context>, path: &str) -> anyhow::Result<Option<
                 };
                 query_parts.push((query_argument.clone(), next_part.to_owned()));
             }
+            if let Some(extra) = parts.next() {
+                return make_error(400, format!("Superfluous query argument {:?}", extra).as_str()).map(Some);
+            }
             // Sadly need to use Url for url encoding, since hypers uri does not have that capability
             let url = Url::parse_with_params(rule.hypixel_path.as_str(), query_parts)?;
             let hypixel_request = Request::builder()
