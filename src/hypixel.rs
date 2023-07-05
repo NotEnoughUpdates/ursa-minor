@@ -23,7 +23,7 @@ pub struct Rule {
     // TODO: filters
 }
 
-pub async fn respond_to(arc: Arc<Context>, path: &str) -> anyhow::Result<Option<Response<Body>>> {
+pub async fn respond_to(arc: &Arc<Context>, path: &str) -> anyhow::Result<Option<Response<Body>>> {
     for rule in &arc.rules {
         if let Some(prefix) = path.strip_prefix(&rule.http_path) {
             let mut parts = prefix.split("/").filter(|it| !it.is_empty());

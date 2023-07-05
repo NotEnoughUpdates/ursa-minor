@@ -57,13 +57,14 @@ async fn respond_to(arc: Arc<Context>, req: Request<Body>) -> anyhow::Result<Res
             .header("Location", "https://git.nea.moe/nea/ursa-minor")
             .body(Body::empty())?);
     }
-    // TODO: require authentication for these paths
     if let Some(meta_path) = path.strip_prefix("/_meta/") {
         return respond_to_meta(arc, req, meta_path).await;
     }
+
     if let Some(hypixel_path) = path.strip_prefix("/v1/hypixel/") {
-        if let Some(resp) = hypixel::respond_to(arc, hypixel_path).await? {
-            return Ok(resp);
+        let (save, _principal) = require_login!(arc, req);
+        if let Some(resp) = hypixel::respond_to(&arc, hypixel_path).await? {
+            return save.save_to(resp);
         }
     }
     return make_error(404, format!("Unknown request path {}", path).as_str());
