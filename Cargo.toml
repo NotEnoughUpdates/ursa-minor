@@ -31,3 +31,7 @@ version = "*"
 
 [dependencies.serde_json]
 version = "*"
+
+[dependencies.uuid]
+version = "*"
+features = ["v4", "fast-rng"]

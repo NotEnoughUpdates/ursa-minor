@@ -4,7 +4,7 @@ use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{ Context as _};
+use anyhow::{Context as _};
 use hyper::{Body, Client, Request, Response, Server};
 use hyper::client::HttpConnector;
 use hyper::service::{make_service_fn, service_fn};
@@ -39,6 +39,7 @@ async fn respond_to(arc: Arc<Context>, req: Request<Body>) -> anyhow::Result<Res
             .header("Location", "https://git.nea.moe/nea/ursa-minor")
             .body(Body::empty())?);
     }
+    // TODO: require authentication for these paths
     if let Some(meta_path) = path.strip_prefix("/_meta/") {
         return respond_to_meta(arc, req, meta_path).await;
     }
@@ -54,10 +55,11 @@ async fn wrap_error(arc: Arc<Context>, req: Request<Body>) -> anyhow::Result<Res
     return match respond_to(arc, req).await {
         Ok(x) => Ok(x),
         Err(e) => {
-            eprint!("{:?}", e);
+            let error_id = uuid::Uuid::new_v4();
+            eprint!("Error id: {} {:?}", error_id, e);
             Ok(Response::builder()
                 .status(500)
-                .body("500 Internal Error\n\nI'm legally not allowed to give you more information".into())?)
+                .body(format!("500 Internal Error\n\nError id: {}\nI'm legally not allowed to give you more information", error_id).into())?)
         }
     };
 }
