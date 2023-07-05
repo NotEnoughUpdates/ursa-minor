@@ -56,7 +56,8 @@ async fn wrap_error(arc: Arc<Context>, req: Request<Body>) -> anyhow::Result<Res
         Ok(x) => Ok(x),
         Err(e) => {
             let error_id = uuid::Uuid::new_v4();
-            eprint!("Error id: {} {:?}", error_id, e);
+            eprintln!("Error id: {error_id}:");
+            eprintln!("{e:?}");
             Ok(Response::builder()
                 .status(500)
                 .body(format!("500 Internal Error\n\nError id: {}\nI'm legally not allowed to give you more information", error_id).into())?)
@@ -74,6 +75,9 @@ async fn main() -> anyhow::Result<()> {
         println!("Loaded dotenv from {}", path.to_str().unwrap_or("?"));
     }
     let hypixel_token = config_var("HYPIXEL_TOKEN")?;
+    let rules = config_var("RULES")?.split(":")
+        .map(|it| std::fs::read(it).map_err(anyhow::Error::from).and_then(|it| serde_json::from_slice::<hypixel::Rule>(&*it).map_err(anyhow::Error::from)))
+        .collect::<Result<Vec<Rule>, _>>()?;
     let port = config_var("PORT")?.parse::<u16>().with_context(|| "Could not parse port at URSA_PORT")?;
     let https = HttpsConnector::new();
     let client = Client::builder()
@@ -81,11 +85,7 @@ async fn main() -> anyhow::Result<()> {
     let arc = Arc::new(Context {
         client,
         hypixel_token,
-        rules: vec![Rule {
-            http_path: "player".into(),
-            hypixel_path: "https://api.hypixel.net/player".into(),
-            query_arguments: vec!["uuid".into()],
-        }],
+        rules,
     });
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let service = make_service_fn(|_conn| {

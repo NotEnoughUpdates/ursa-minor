@@ -1,9 +1,6 @@
 {
-  "http-path": [
-    "hypixel",
-    "player"
-  ],
-  "hypixel-path": "/player",
+  "http-path": "player",
+  "hypixel-path": "https://api.hypixel.net/player",
   "query-arguments": [
     "uuid"
   ]
