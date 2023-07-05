@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use hyper::{Body, Method, Request, Response};
 use serde::Deserialize;
 use url::Url;
 
-use crate::{Context, make_error};
+use crate::{global_application_config, make_error};
 use crate::util::UrlForRequest;
 
 #[derive(Deserialize, Debug)]
@@ -23,8 +21,8 @@ pub struct Rule {
     // TODO: filters
 }
 
-pub async fn respond_to(arc: &Arc<Context>, path: &str) -> anyhow::Result<Option<Response<Body>>> {
-    for rule in &arc.rules {
+pub async fn respond_to(path: &str) -> anyhow::Result<Option<Response<Body>>> {
+    for rule in &global_application_config.rules {
         if let Some(prefix) = path.strip_prefix(&rule.http_path) {
             let mut parts = prefix.split("/").filter(|it| !it.is_empty());
             let mut query_parts: Vec<(String, String)> = Vec::with_capacity(rule.query_arguments.len());
@@ -42,9 +40,9 @@ pub async fn respond_to(arc: &Arc<Context>, path: &str) -> anyhow::Result<Option
             let hypixel_request = Request::builder()
                 .url(url)?
                 .method(Method::GET)
-                .header("API-Key", &arc.hypixel_token)
+                .header("API-Key", &global_application_config.hypixel_token)
                 .body(Body::empty())?;
-            let hypixel_response = arc.client.request(hypixel_request).await?;
+            let hypixel_response = global_application_config.client.request(hypixel_request).await?;
             // TODO: add temporary global backoff when hitting an error (especially 429)
             if hypixel_response.status().as_u16() != 200 {
                 return make_error(502, "Failed to request hypixel upstream").map(Some);

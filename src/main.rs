@@ -1,9 +1,9 @@
-#![feature(async_fn_in_trait)]
+#![feature(lazy_cell)]
 extern crate core;
 
+use std::cell::LazyCell;
 use std::env;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use anyhow::{Context as _};
 use hmac::digest::KeyInit;
@@ -21,9 +21,10 @@ pub mod mojang;
 pub mod meta;
 
 #[derive(Debug)]
-pub struct Context {
+pub struct GlobalApplicationContext {
     client: Client<HttpsConnector<HttpConnector>>,
     hypixel_token: String,
+    port: u16,
     rules: Vec<Rule>,
     allow_anonymous: bool,
     // Use sha384 to prevent against length extension attacks
@@ -37,8 +38,8 @@ fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Bod
         .body(format!("{} {}", status_code, error_text).into())?);
 }
 
-async fn respond_to_meta(arc: Arc<Context>, req: Request<Body>, meta_path: &str) -> anyhow::Result<Response<Body>> {
-    let (save, principal) = require_login!(arc, req);
+async fn respond_to_meta(req: Request<Body>, meta_path: &str) -> anyhow::Result<Response<Body>> {
+    let (save, principal) = require_login!(req);
     let response = if meta_path == "principal" {
         Response::builder()
             .status(200)
@@ -49,7 +50,7 @@ async fn respond_to_meta(arc: Arc<Context>, req: Request<Body>, meta_path: &str)
     return save.save_to(response);
 }
 
-async fn respond_to(arc: Arc<Context>, req: Request<Body>) -> anyhow::Result<Response<Body>> {
+async fn respond_to(req: Request<Body>) -> anyhow::Result<Response<Body>> {
     let path = &req.uri().path().to_owned();
     if path == "/" {
         return Ok(Response::builder()
@@ -58,20 +59,20 @@ async fn respond_to(arc: Arc<Context>, req: Request<Body>) -> anyhow::Result<Res
             .body(Body::empty())?);
     }
     if let Some(meta_path) = path.strip_prefix("/_meta/") {
-        return respond_to_meta(arc, req, meta_path).await;
+        return respond_to_meta(req, meta_path).await;
     }
 
     if let Some(hypixel_path) = path.strip_prefix("/v1/hypixel/") {
-        let (save, _principal) = require_login!(arc, req);
-        if let Some(resp) = hypixel::respond_to(&arc, hypixel_path).await? {
+        let (save, _principal) = require_login!(req);
+        if let Some(resp) = hypixel::respond_to(hypixel_path).await? {
             return save.save_to(resp);
         }
     }
     return make_error(404, format!("Unknown request path {}", path).as_str());
 }
 
-async fn wrap_error(arc: Arc<Context>, req: Request<Body>) -> anyhow::Result<Response<Body>> {
-    return match respond_to(arc, req).await {
+async fn wrap_error(req: Request<Body>) -> anyhow::Result<Response<Body>> {
+    return match respond_to(req).await {
         Ok(x) => Ok(x),
         Err(e) => {
             let error_id = uuid::Uuid::new_v4();
@@ -88,8 +89,12 @@ fn config_var(name: &str) -> anyhow::Result<String> {
     env::var(format!("URSA_{}", name)).with_context(|| format!("Could not find {} expected to be found in the environment at URSA_{}", name, name))
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+#[allow(non_upper_case_globals)]
+const global_application_config: LazyCell<GlobalApplicationContext> = LazyCell::new(|| {
+    init_config().unwrap()
+});
+
+fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     if let Ok(path) = dotenv::dotenv() {
         println!("Loaded dotenv from {}", path.to_str().unwrap_or("?"));
     }
@@ -103,21 +108,24 @@ async fn main() -> anyhow::Result<()> {
     let https = HttpsConnector::new();
     let client = Client::builder()
         .build::<_, Body>(https);
-    let arc = Arc::new(Context {
+    Ok(GlobalApplicationContext {
         client,
+        port,
         hypixel_token,
         rules,
         allow_anonymous,
         key: Hmac::new_from_slice(secret.as_bytes())?,
-    });
+    })
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     println!("Ursa minor rises above the sky!");
-    println!("Launching with configuration: {:#?}", arc);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    println!("Launching with configuration: {:#?}", *global_application_config);
+    let addr = SocketAddr::from(([127, 0, 0, 1], global_application_config.port));
     let service = make_service_fn(|_conn| {
-        // TODO: replace arc with &'static
-        let carc = Arc::clone(&arc);
-        async move {
-            Ok::<_, anyhow::Error>(service_fn(move |req| { wrap_error(Arc::clone(&carc), req) }))
+        async {
+            Ok::<_, anyhow::Error>(service_fn(move |req| { wrap_error(req) }))
         }
     });
     let server = Server::bind(&addr).serve(service);
