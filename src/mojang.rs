@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use hyper::{Body, Request, Response};
 use serde::Deserialize;
 use url::Url;
@@ -33,6 +33,7 @@ impl<'a> SaveOnExit<'a> {
             let signed = SignWithKey::sign_with_key(BTreeMap::from([
                 ("id", &principal.id.to_string()),
                 ("name", &principal.name),
+                ("valid_since", &std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis().to_string())
             ]), &arc.key)?;
             response.headers_mut().append("x-ursa-token", HeaderValue::from_str(&signed)?);
         }
@@ -56,8 +57,16 @@ pub async fn require_login<'a>(arc: &'a Arc<Context>, req: &'a Request<Body>) ->
             name: "CoolGuy123".to_owned(),
         })));
     }
-    if let Some(principal) = verify_existing_login(&arc, &req).await? {
-        return Ok(Ok((SaveOnExit::DontSave, principal)));
+    match verify_existing_login(&arc, &req).await {
+        Err(_) => {
+            return Ok(Err(make_error(401, "Failed to verify JWT")?));
+        }
+        Ok(Some(principal)) => {
+            return Ok(Ok((SaveOnExit::DontSave, principal)));
+        }
+        Ok(_) => {
+            // Ignore absent JWT tokens
+        }
     }
     verify_login_attempt(&arc, &req).await.map(|it| it.map(|it| (SaveOnExit::Save {
         principal: it.clone(),
@@ -72,6 +81,13 @@ async fn verify_existing_login(arc: &Arc<Context>, req: &Request<Body>) -> anyho
     let mut claims: BTreeMap<String, String> = VerifyWithKey::verify_with_key(token, &arc.key)?;
     let id = claims.get("id").ok_or(anyhow!("Missing id claim")).and_then(|it| Uuid::from_str(it).map_err(anyhow::Error::new))?;
     let name = claims.remove("name").ok_or(anyhow!("Missing name claim"))?;
+    let valid_since = claims.remove("valid_since").ok_or(anyhow!("Missing timestamp"))
+        .and_then(|it| it.parse::<u64>().map_err(anyhow::Error::new))
+        .map(std::time::Duration::from_millis)?;
+    let right_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+    if valid_since > right_now || valid_since + std::time::Duration::from_secs(3600) < right_now {
+        bail!("JWT not valid");
+    }
     return Ok(Some(MojangUserPrincipal {
         id,
         name,
