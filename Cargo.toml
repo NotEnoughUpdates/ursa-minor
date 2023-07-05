@@ -34,4 +34,11 @@ version = "*"
 
 [dependencies.uuid]
 version = "*"
-features = ["v4", "fast-rng"]
+features = ["v4", "fast-rng", "serde"]
+
+[dependencies.jwt]
+version = "*"
+[dependencies.hmac]
+version = "*"
+[dependencies.sha2]
+version = "*"

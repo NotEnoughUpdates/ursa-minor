@@ -1,13 +1,13 @@
-use std::str::FromStr;
 use std::sync::Arc;
 
-use hyper::{Body, Method, Request, Response, Uri};
+use hyper::{Body, Method, Request, Response};
 use serde::Deserialize;
 use url::Url;
 
 use crate::{Context, make_error};
+use crate::util::UrlForRequest;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Rule {
     /// The path of this endpoint in our api.
     #[serde(rename = "http-path")]
@@ -37,10 +37,9 @@ pub async fn respond_to(arc: Arc<Context>, path: &str) -> anyhow::Result<Option<
             if let Some(extra) = parts.next() {
                 return make_error(400, format!("Superfluous query argument {:?}", extra).as_str()).map(Some);
             }
-            // Sadly need to use Url for url encoding, since hypers uri does not have that capability
             let url = Url::parse_with_params(rule.hypixel_path.as_str(), query_parts)?;
             let hypixel_request = Request::builder()
-                .uri(Uri::from_str(url.as_str())?)
+                .url(url)?
                 .method(Method::GET)
                 .header("API-Key", &arc.hypixel_token)
                 .body(Body::empty())?;
