@@ -40,7 +40,7 @@ pub async fn respond_to(path: &str) -> anyhow::Result<Option<Response<Body>>> {
             let hypixel_request = Request::builder()
                 .url(url)?
                 .method(Method::GET)
-                .header("API-Key", &global_application_config.hypixel_token)
+                .header("API-Key", &global_application_config.hypixel_token.0)
                 .body(Body::empty())?;
             let hypixel_response = global_application_config.client.request(hypixel_request).await?;
             // TODO: add temporary global backoff when hitting an error (especially 429)

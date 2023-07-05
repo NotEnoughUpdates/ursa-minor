@@ -14,6 +14,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper_tls::HttpsConnector;
 
 use crate::hypixel::Rule;
+use crate::util::Obscure;
 
 pub mod util;
 pub mod hypixel;
@@ -23,7 +24,7 @@ pub mod meta;
 #[derive(Debug)]
 pub struct GlobalApplicationContext {
     client: Client<HttpsConnector<HttpConnector>>,
-    hypixel_token: String,
+    hypixel_token: Obscure<String>,
     port: u16,
     rules: Vec<Rule>,
     allow_anonymous: bool,
@@ -111,7 +112,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     Ok(GlobalApplicationContext {
         client,
         port,
-        hypixel_token,
+        hypixel_token: Obscure(hypixel_token),
         rules,
         allow_anonymous,
         key: Hmac::new_from_slice(secret.as_bytes())?,
