@@ -1,0 +1,33 @@
+[package]
+name = "ursa-minor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dependencies.dotenv]
+version = "*"
+
+[dependencies.hyper-tls]
+version = "*"
+
+[dependencies.hyper]
+version = "*"
+features = ["full"]
+
+[dependencies.serde]
+version = "*"
+features = ["derive"]
+
+[dependencies.url]
+version = "*"
+
+[dependencies.tokio]
+version = "*"
+features = ["rt-multi-thread", "macros", "signal"]
+
+[dependencies.anyhow]
+version = "*"
+
+[dependencies.serde_json]
+version = "*"

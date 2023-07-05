@@ -1,0 +1,10 @@
+{
+  "http-path": [
+    "hypixel",
+    "player"
+  ],
+  "hypixel-path": "/player",
+  "query-arguments": [
+    "uuid"
+  ]
+}
