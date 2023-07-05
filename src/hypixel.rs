@@ -45,6 +45,10 @@ pub async fn respond_to(arc: Arc<Context>, path: &str) -> anyhow::Result<Option<
                 .header("API-Key", &arc.hypixel_token)
                 .body(Body::empty())?;
             let hypixel_response = arc.client.request(hypixel_request).await?;
+            // TODO: add temporary global backoff when hitting an error (especially 429)
+            if hypixel_response.status().as_u16() != 200 {
+                return make_error(502, "Failed to request hypixel upstream").map(Some);
+            }
             return Ok(Some(Response::builder()
                 .header("Age", "0")
                 .header("Cache-Control", "public, s-maxage=60, max-age=300")
