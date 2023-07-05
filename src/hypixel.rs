@@ -38,6 +38,7 @@ pub async fn respond_to(arc: &Arc<Context>, path: &str) -> anyhow::Result<Option
                 return make_error(400, format!("Superfluous query argument {:?}", extra).as_str()).map(Some);
             }
             let url = Url::parse_with_params(rule.hypixel_path.as_str(), query_parts)?;
+            println!("Proxying request for {url}");
             let hypixel_request = Request::builder()
                 .url(url)?
                 .method(Method::GET)

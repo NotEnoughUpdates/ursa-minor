@@ -1,0 +1,7 @@
+{
+  "http-path": "bingo",
+  "hypixel-path": "https://api.hypixel.net/skyblock/bingo",
+  "query-arguments": [
+    "uuid"
+  ]
+}

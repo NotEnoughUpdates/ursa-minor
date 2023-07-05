@@ -1,0 +1,7 @@
+{
+  "http-path": "status",
+  "hypixel-path": "https://api.hypixel.net/status",
+  "query-arguments": [
+    "uuid"
+  ]
+}
