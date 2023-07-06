@@ -16,7 +16,7 @@
 
 #![feature(lazy_cell)]
 #![feature(adt_const_params)]
-#[allow(incomplete_features)]
+#![allow(incomplete_features)]
 extern crate core;
 
 use std::env;
@@ -57,9 +57,9 @@ pub struct GlobalApplicationContext {
 }
 
 fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Body>> {
-    return Ok(Response::builder()
+    Ok(Response::builder()
         .status(status_code)
-        .body(format!("{} {}", status_code, error_text).into())?);
+        .body(format!("{} {}", status_code, error_text).into())?)
 }
 
 async fn respond_to_meta(req: RequestContext, meta_path: &str) -> anyhow::Result<Response<Body>> {
@@ -71,7 +71,7 @@ async fn respond_to_meta(req: RequestContext, meta_path: &str) -> anyhow::Result
     } else {
         make_error(404, format!("Unknown meta request {meta_path}").as_str())?
     };
-    return save.save_to(response);
+    save.save_to(response)
 }
 
 async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body>> {
@@ -96,7 +96,7 @@ async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body
 }
 
 async fn wrap_error(context: RequestContext) -> anyhow::Result<Response<Body>> {
-    return match respond_to(context).await {
+    match respond_to(context).await {
         Ok(x) => Ok(x),
         Err(e) => {
             let error_id = uuid::Uuid::new_v4();
@@ -106,7 +106,7 @@ async fn wrap_error(context: RequestContext) -> anyhow::Result<Response<Body>> {
                 .status(500)
                 .body(format!("500 Internal Error\n\nError id: {}", error_id).into())?)
         }
-    };
+    }
 }
 
 fn config_var(name: &str) -> anyhow::Result<String> {
@@ -129,12 +129,12 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     let hypixel_token = config_var("HYPIXEL_TOKEN")?;
     let allow_anonymous = config_var("ANONYMOUS").unwrap_or("false".to_owned()) == "true";
     let rules = config_var("RULES")?
-        .split(":")
+        .split(':')
         .map(|it| {
             std::fs::read(it)
                 .map_err(anyhow::Error::from)
                 .and_then(|it| {
-                    serde_json::from_slice::<hypixel::Rule>(&*it).map_err(anyhow::Error::from)
+                    serde_json::from_slice::<hypixel::Rule>(&it).map_err(anyhow::Error::from)
                 })
         })
         .collect::<Result<Vec<Rule>, _>>()?;

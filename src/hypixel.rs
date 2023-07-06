@@ -41,7 +41,7 @@ pub struct Rule {
 pub async fn respond_to(context: &mut RequestContext, path: &str) -> anyhow::Result<Option<Response<Body>>> {
     for rule in &global_application_config.rules {
         if let Some(prefix) = path.strip_prefix(&rule.http_path) {
-            let parts = prefix.split("/").filter(|it| !it.is_empty()).collect::<Vec<_>>();
+            let parts = prefix.split('/').filter(|it| !it.is_empty()).collect::<Vec<_>>();
             let mut query_parts: Vec<(String, String)> = Vec::with_capacity(rule.query_arguments.len());
             let mut part_iter = parts.iter();
             for query_argument in &rule.query_arguments {

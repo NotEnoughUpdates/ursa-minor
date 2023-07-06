@@ -57,7 +57,7 @@ impl SaveOnExit {
 #[macro_export]
 macro_rules! require_login {
     ($req:expr) => {
-        match crate::mojang::require_login(&$req).await? {
+        match $crate::mojang::require_login(&$req).await? {
             Ok(p) => p,
             Err(response) => return Ok(response),
         }
@@ -71,7 +71,7 @@ pub async fn require_login(req: &RequestContext) -> anyhow::Result<Result<(SaveO
             name: "CoolGuy123".to_owned(),
         })));
     }
-    match verify_existing_login(&req).await {
+    match verify_existing_login(req).await {
         Err(_) => {
             return Ok(Err(make_error(401, "Failed to verify JWT")?));
         }
@@ -82,7 +82,7 @@ pub async fn require_login(req: &RequestContext) -> anyhow::Result<Result<(SaveO
             // Ignore absent JWT tokens
         }
     }
-    verify_login_attempt(&req).await.map(|it| it.map(|it| (SaveOnExit::Save {
+    verify_login_attempt(req).await.map(|it| it.map(|it| (SaveOnExit::Save {
         principal: it.clone(),
     }, it)))
 }
@@ -101,10 +101,10 @@ async fn verify_existing_login(req: &RequestContext) -> anyhow::Result<Option<Mo
     if valid_since > right_now || valid_since + std::time::Duration::from_secs(3600) < right_now {
         bail!("JWT not valid");
     }
-    return Ok(Some(MojangUserPrincipal {
+    Ok(Some(MojangUserPrincipal {
         id,
         name,
-    }));
+    }))
 }
 
 
