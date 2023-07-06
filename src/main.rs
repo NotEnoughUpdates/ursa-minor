@@ -80,7 +80,7 @@ async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body
     if path == "/" {
         return Ok(Response::builder()
             .status(302)
-            .header("Location", "https://git.nea.moe/nea/ursa-minor")
+            .header("Location", "https://github.com/NotEnoughUpdates/ursa-minor")
             .body(Body::empty())?);
     }
     if let Some(meta_path) = path.strip_prefix("/_meta/") {
