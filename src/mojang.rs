@@ -14,21 +14,30 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::collections::BTreeMap;
-use std::str::FromStr;
-use anyhow::{anyhow, bail};
+use std::time::SystemTime;
+
+use anyhow::bail;
 use hyper::{Body, Request, Response};
-use serde::Deserialize;
-use url::Url;
-use uuid::Uuid;
-use crate::{global_application_config, make_error, RequestContext};
-use crate::util::UrlForRequest;
 use hyper::body::Buf;
 use hyper::http::HeaderValue;
 use jwt::{SignWithKey, VerifyWithKey};
+use serde::{Deserialize, Serialize};
+use url::Url;
+use uuid::Uuid;
+
+use crate::{global_application_config, make_error, RequestContext};
+use crate::util::{MillisecondTimestamp, UrlForRequest};
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct JWTPrincipal {
+    pub id: Uuid,
+    pub name: String,
+    pub valid_until: MillisecondTimestamp,
+    pub valid_since: MillisecondTimestamp,
+}
 
 #[derive(Deserialize, Clone, Debug)]
-pub struct MojangUserPrincipal {
+pub struct MojangUser {
     pub id: Uuid,
     pub name: String,
 }
@@ -36,20 +45,24 @@ pub struct MojangUserPrincipal {
 #[must_use]
 pub enum SaveOnExit {
     DontSave,
+    SaveExpires {
+        timestamp: MillisecondTimestamp,
+    },
     Save {
-        principal: MojangUserPrincipal,
+        principal: JWTPrincipal,
     },
 }
 
 impl SaveOnExit {
     pub fn save_to(&self, mut response: Response<Body>) -> anyhow::Result<Response<Body>> {
+        let headers = response.headers_mut();
         if let SaveOnExit::Save { principal } = self {
-            let signed = SignWithKey::sign_with_key(BTreeMap::from([
-                ("id", &principal.id.to_string()),
-                ("name", &principal.name),
-                ("valid_since", &std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis().to_string())
-            ]), &global_application_config.key)?;
-            response.headers_mut().append("x-ursa-token", HeaderValue::from_str(&signed)?);
+            let signed = SignWithKey::sign_with_key(principal, &global_application_config.key)?;
+            headers.append("x-ursa-token", HeaderValue::from_str(&signed)?);
+            headers.append("x-ursa-expires", HeaderValue::from_str(&principal.valid_until.0.to_string())?);
+        }
+        if let SaveOnExit::SaveExpires { timestamp } = self {
+            headers.append("x-ursa-expires", HeaderValue::from_str(&timestamp.0.to_string())?);
         }
         Ok(response)
     }
@@ -63,12 +76,13 @@ macro_rules! require_login {
         }
     };
 }
-
-pub async fn require_login(req: &RequestContext) -> anyhow::Result<Result<(SaveOnExit, MojangUserPrincipal), Response<Body>>> {
+pub async fn require_login(req: &RequestContext) -> anyhow::Result<Result<(SaveOnExit, JWTPrincipal), Response<Body>>> {
     if global_application_config.allow_anonymous {
-        return Ok(Ok((SaveOnExit::DontSave, MojangUserPrincipal {
+        return Ok(Ok((SaveOnExit::DontSave, JWTPrincipal {
             id: Uuid::from_u128(0),
             name: "CoolGuy123".to_owned(),
+            valid_until: MillisecondTimestamp(u64::MAX),
+            valid_since: MillisecondTimestamp(0),
         })));
     }
     match verify_existing_login(req).await {
@@ -76,7 +90,7 @@ pub async fn require_login(req: &RequestContext) -> anyhow::Result<Result<(SaveO
             return Ok(Err(make_error(401, "Failed to verify JWT")?));
         }
         Ok(Some(principal)) => {
-            return Ok(Ok((SaveOnExit::DontSave, principal)));
+            return Ok(Ok((SaveOnExit::SaveExpires { timestamp: principal.valid_until }, principal)));
         }
         Ok(_) => {
             // Ignore absent JWT tokens
@@ -87,28 +101,20 @@ pub async fn require_login(req: &RequestContext) -> anyhow::Result<Result<(SaveO
     }, it)))
 }
 
-async fn verify_existing_login(req: &RequestContext) -> anyhow::Result<Option<MojangUserPrincipal>> {
+async fn verify_existing_login(req: &RequestContext) -> anyhow::Result<Option<JWTPrincipal>> {
     let Some(token) = req.request.headers().get("x-ursa-token").and_then(|it| it.to_str().ok()) else {
         return Ok(None);
     };
-    let mut claims: BTreeMap<String, String> = VerifyWithKey::verify_with_key(token, &global_application_config.key)?;
-    let id = claims.get("id").ok_or(anyhow!("Missing id claim")).and_then(|it| Uuid::from_str(it).map_err(anyhow::Error::new))?;
-    let name = claims.remove("name").ok_or(anyhow!("Missing name claim"))?;
-    let valid_since = claims.remove("valid_since").ok_or(anyhow!("Missing timestamp"))
-        .and_then(|it| it.parse::<u64>().map_err(anyhow::Error::new))
-        .map(std::time::Duration::from_millis)?;
-    let right_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
-    if valid_since > right_now || valid_since + std::time::Duration::from_secs(3600) < right_now {
+    let claims: JWTPrincipal = VerifyWithKey::verify_with_key(token, &global_application_config.key)?;
+    let right_now = MillisecondTimestamp::try_from(SystemTime::now())?;
+    if claims.valid_since > right_now || claims.valid_until < right_now {
         bail!("JWT not valid");
     }
-    Ok(Some(MojangUserPrincipal {
-        id,
-        name,
-    }))
+    Ok(Some(claims))
 }
 
 
-async fn verify_login_attempt(req: &RequestContext) -> anyhow::Result<Result<MojangUserPrincipal, Response<Body>>> {
+async fn verify_login_attempt(req: &RequestContext) -> anyhow::Result<Result<JWTPrincipal, Response<Body>>> {
     // this is a flawed way of doing logins, but I do not want to expend the cryptographical resources
     // to make it less flawed and everyone else does it the same way as well, and this has not become
     // a widely used attack
@@ -126,6 +132,12 @@ async fn verify_login_attempt(req: &RequestContext) -> anyhow::Result<Result<Moj
         return Ok(Err(make_error(401, "Unauthorized")?));
     }
     let buffer = hyper::body::aggregate(mojang_response).await?;
-    let principal = serde_json::from_reader::<_, MojangUserPrincipal>(buffer.reader())?;
-    Ok(Ok(principal))
+    let user = serde_json::from_reader::<_, MojangUser>(buffer.reader())?;
+    let right_now = MillisecondTimestamp::try_from(SystemTime::now())?;
+    Ok(Ok(JWTPrincipal {
+        id: user.id,
+        name: user.name,
+        valid_until: right_now + global_application_config.default_token_duration,
+        valid_since: right_now,
+    }))
 }

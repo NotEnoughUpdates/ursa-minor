@@ -17,8 +17,10 @@
 use hyper::http::request::Builder;
 use hyper::Uri;
 use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Add, Deref, DerefMut};
 use std::str::FromStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 // Sadly need to use Url for url encoding, since hypers uri does not have that capability
@@ -55,3 +57,24 @@ impl<T, const L: &'static str> DerefMut for Obscure<T, L> {
         &mut self.0
     }
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
+pub struct MillisecondTimestamp(pub u64);
+
+impl Add<Duration> for MillisecondTimestamp {
+    type Output = MillisecondTimestamp;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        MillisecondTimestamp(self.0 + rhs.as_millis() as u64)
+    }
+}
+
+impl TryFrom<SystemTime> for MillisecondTimestamp {
+    type Error = anyhow::Error;
+
+    fn try_from(value: SystemTime) -> anyhow::Result<Self, Self::Error> {
+        // Fails in ~580 billion years
+        Ok(MillisecondTimestamp(value.duration_since(UNIX_EPOCH)?.as_millis() as u64))
+    }
+}
+

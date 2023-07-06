@@ -21,13 +21,14 @@ extern crate core;
 
 use std::env;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use hmac::digest::KeyInit;
 use hmac::Hmac;
+use hyper::{Body, Client, Request, Response, Server};
 use hyper::client::HttpConnector;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Client, Request, Response, Server};
 use hyper_tls::HttpsConnector;
 
 use crate::hypixel::Rule;
@@ -54,6 +55,7 @@ pub struct GlobalApplicationContext {
     // Use sha384 to prevent against length extension attacks
     key: Hmac<sha2::Sha384>,
     redis_url: Obscure<String>,
+    default_token_duration: Duration,
 }
 
 fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Body>> {
@@ -141,6 +143,9 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     let port = config_var("PORT")?
         .parse::<u16>()
         .with_context(|| "Could not parse port at URSA_PORT")?;
+    let token_lifespan = config_var("TOKEN_LIFESPAN")
+        .unwrap_or("3600".to_owned())
+        .parse::<u64>().with_context(|| "Could not parse token lifespan at URSA_TOKEN_LIFESPAN")?;
     let secret = config_var("SECRET")?;
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, Body>(https);
@@ -153,6 +158,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
         allow_anonymous,
         key: Hmac::new_from_slice(secret.as_bytes())?,
         redis_url: Obscure(redis_url),
+        default_token_duration: Duration::from_secs(token_lifespan),
     })
 }
 
