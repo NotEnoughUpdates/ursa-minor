@@ -19,25 +19,24 @@
 #[allow(incomplete_features)]
 extern crate core;
 
-use std::cell::LazyCell;
 use std::env;
 use std::net::SocketAddr;
 
-use anyhow::{Context as _};
+use anyhow::Context as _;
 use hmac::digest::KeyInit;
 use hmac::Hmac;
-use hyper::{Body, Client, Request, Response, Server};
 use hyper::client::HttpConnector;
 use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Client, Request, Response, Server};
 use hyper_tls::HttpsConnector;
 
 use crate::hypixel::Rule;
 use crate::util::Obscure;
 
-pub mod util;
 pub mod hypixel;
-pub mod mojang;
 pub mod meta;
+pub mod mojang;
+pub mod util;
 
 #[derive(Debug)]
 pub struct RequestContext {
@@ -111,13 +110,17 @@ async fn wrap_error(context: RequestContext) -> anyhow::Result<Response<Body>> {
 }
 
 fn config_var(name: &str) -> anyhow::Result<String> {
-    env::var(format!("URSA_{}", name)).with_context(|| format!("Could not find {} expected to be found in the environment at URSA_{}", name, name))
+    env::var(format!("URSA_{}", name)).with_context(|| {
+        format!(
+            "Could not find {} expected to be found in the environment at URSA_{}",
+            name, name
+        )
+    })
 }
 
 #[allow(non_upper_case_globals)]
-static global_application_config: std::sync::LazyLock<GlobalApplicationContext> = std::sync::LazyLock::new(|| {
-    init_config().unwrap()
-});
+static global_application_config: std::sync::LazyLock<GlobalApplicationContext> =
+    std::sync::LazyLock::new(|| init_config().unwrap());
 
 fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     if let Ok(path) = dotenv::dotenv() {
@@ -125,14 +128,22 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     }
     let hypixel_token = config_var("HYPIXEL_TOKEN")?;
     let allow_anonymous = config_var("ANONYMOUS").unwrap_or("false".to_owned()) == "true";
-    let rules = config_var("RULES")?.split(":")
-        .map(|it| std::fs::read(it).map_err(anyhow::Error::from).and_then(|it| serde_json::from_slice::<hypixel::Rule>(&*it).map_err(anyhow::Error::from)))
+    let rules = config_var("RULES")?
+        .split(":")
+        .map(|it| {
+            std::fs::read(it)
+                .map_err(anyhow::Error::from)
+                .and_then(|it| {
+                    serde_json::from_slice::<hypixel::Rule>(&*it).map_err(anyhow::Error::from)
+                })
+        })
         .collect::<Result<Vec<Rule>, _>>()?;
-    let port = config_var("PORT")?.parse::<u16>().with_context(|| "Could not parse port at URSA_PORT")?;
+    let port = config_var("PORT")?
+        .parse::<u16>()
+        .with_context(|| "Could not parse port at URSA_PORT")?;
     let secret = config_var("SECRET")?;
     let https = HttpsConnector::new();
-    let client = Client::builder()
-        .build::<_, Body>(https);
+    let client = Client::builder().build::<_, Body>(https);
     let redis_url = config_var("REDIS_URL")?;
     Ok(GlobalApplicationContext {
         client,
@@ -148,7 +159,10 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("Ursa minor rises above the sky!");
-    println!("Launching with configuration: {:#?}", *global_application_config);
+    println!(
+        "Launching with configuration: {:#?}",
+        *global_application_config
+    );
     let addr = SocketAddr::from(([127, 0, 0, 1], global_application_config.port));
     let redis_client = redis::Client::open(global_application_config.redis_url.clone())?;
     let managed = redis::aio::ConnectionManager::new(redis_client).await?;

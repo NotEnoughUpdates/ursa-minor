@@ -14,26 +14,24 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use hyper::http::request::Builder;
+use hyper::Uri;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
-use hyper::http::request::Builder;
-use hyper::Uri;
 use url::Url;
 
 // Sadly need to use Url for url encoding, since hypers uri does not have that capability
 pub trait UrlForRequest {
-    fn url(self, url: Url) -> anyhow::Result<Self> where Self: Sized;
+    fn url(self, url: Url) -> anyhow::Result<Self>
+    where
+        Self: Sized;
 }
 
 impl UrlForRequest for Builder {
     fn url(self, url: Url) -> anyhow::Result<Self> {
         Ok(self.uri(Uri::from_str(url.as_str())?))
     }
-}
-
-pub fn pure_true() -> bool {
-    true
 }
 
 pub struct Obscure<T, const L: &'static str = "..">(pub T);
