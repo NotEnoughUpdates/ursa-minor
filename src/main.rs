@@ -57,6 +57,8 @@ pub struct GlobalApplicationContext {
     key: Hmac<sha2::Sha384>,
     redis_url: Obscure<String>,
     default_token_duration: Duration,
+    rate_limit_lifespan: Duration,
+    rate_limit_bucket: u64,
 }
 
 fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Body>> {
@@ -78,8 +80,8 @@ async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body
     }
 
     if let Some(hypixel_path) = path.strip_prefix("/v1/hypixel/") {
-        let (save, _principal) = require_login!(context);
-        if let Some(resp) = hypixel::respond_to(&mut context, hypixel_path).await? {
+        let (save, principal) = require_login!(context);
+        if let Some(resp) = hypixel::respond_to(&mut context, hypixel_path, principal).await? {
             return save.save_to(resp);
         }
     }
@@ -139,6 +141,8 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, Body>(https);
     let redis_url = config_var("REDIS_URL")?;
+    let rate_limit_lifespan = Duration::from_secs(config_var("RATE_LIMIT_TIMEOUT")?.parse::<u64>()?);
+    let rate_limit_bucket = config_var("RATE_LIMIT_BUCKET")?.parse::<u64>()?;
     Ok(GlobalApplicationContext {
         client,
         port,
@@ -148,6 +152,8 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
         key: Hmac::new_from_slice(secret.as_bytes())?,
         redis_url: Obscure(redis_url),
         default_token_duration: Duration::from_secs(token_lifespan),
+        rate_limit_lifespan,
+        rate_limit_bucket,
     })
 }
 

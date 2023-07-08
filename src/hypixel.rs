@@ -14,12 +14,15 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::fmt::format;
+
 use hyper::{Body, Method, Request, Response};
-use redis::Cmd;
+use redis::{Cmd, Pipeline};
 use serde::Deserialize;
 use url::Url;
 
 use crate::{global_application_config, make_error, RequestContext};
+use crate::mojang::JWTPrincipal;
 use crate::util::UrlForRequest;
 
 #[derive(Deserialize, Debug)]
@@ -38,7 +41,7 @@ pub struct Rule {
     // TODO: filters
 }
 
-pub async fn respond_to(context: &mut RequestContext, path: &str) -> anyhow::Result<Option<Response<Body>>> {
+pub async fn respond_to(context: &mut RequestContext, path: &str, principal: JWTPrincipal) -> anyhow::Result<Option<Response<Body>>> {
     for rule in &global_application_config.rules {
         if let Some(prefix) = path.strip_prefix(&rule.http_path) {
             let parts = prefix.split('/').filter(|it| !it.is_empty()).collect::<Vec<_>>();
@@ -54,7 +57,27 @@ pub async fn respond_to(context: &mut RequestContext, path: &str) -> anyhow::Res
                 return make_error(400, format!("Superfluous query argument {:?}", extra).as_str()).map(Some);
             }
             let url = Url::parse_with_params(rule.hypixel_path.as_str(), query_parts)?;
-            println!("Proxying request for {url}");
+            let mut diagnostics_key = String::new();
+            for part in parts {
+                if !diagnostics_key.is_empty() {
+                    diagnostics_key.push(':');
+                }
+                diagnostics_key.push_str(part);
+            }
+            let bucket = format!("ratelimit:{}", principal.id.to_u128_le());
+            let mut resp = context.redis_client.send_packed_commands(&Pipeline::new()
+                .zincr(format!("hypixel:request:{}", rule.http_path), diagnostics_key, 1)
+                .cmd("EXPIRE").arg(&bucket).arg(global_application_config.rate_limit_lifespan.as_secs()).arg("NX")
+                .incr(&bucket, 1), 0, 3).await?;
+            let bucket_usage = resp.remove(2);
+            if let redis::Value::Int(bucket_usage_int) = bucket_usage {
+                if bucket_usage_int > global_application_config.rate_limit_bucket as i64 {
+                    return make_error(429, "Rate limit exceeded").map(Some);
+                }
+            } else {
+                return make_error(500, "Redis failure").map(Some);
+            }
+
             let hypixel_request = Request::builder()
                 .url(url)?
                 .method(Method::GET)
@@ -65,15 +88,6 @@ pub async fn respond_to(context: &mut RequestContext, path: &str) -> anyhow::Res
             if hypixel_response.status().as_u16() != 200 {
                 return make_error(502, "Failed to request hypixel upstream").map(Some);
             }
-            let mut diagnostics_key = String::new();
-            for part in parts {
-                if !diagnostics_key.is_empty() {
-                    diagnostics_key.push(':');
-                }
-                diagnostics_key.push_str(part);
-            }
-            let cmd = Cmd::zincr(format!("hypixel:request:{}", rule.http_path), diagnostics_key, 1);
-            context.redis_client.send_packed_command(&cmd).await?;
             return Ok(Some(Response::builder()
                 .header("Age", "0")
                 .header("Cache-Control", "public, s-maxage=60, max-age=300")
