@@ -32,6 +32,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper_tls::HttpsConnector;
 
 use crate::hypixel::Rule;
+use crate::meta::respond_to_meta;
 use crate::util::Obscure;
 
 pub mod hypixel;
@@ -62,18 +63,6 @@ fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Bod
     Ok(Response::builder()
         .status(status_code)
         .body(format!("{} {}", status_code, error_text).into())?)
-}
-
-async fn respond_to_meta(req: RequestContext, meta_path: &str) -> anyhow::Result<Response<Body>> {
-    let (save, principal) = require_login!(req);
-    let response = if meta_path == "principal" {
-        Response::builder()
-            .status(200)
-            .body(format!("{principal:#?}").into())?
-    } else {
-        make_error(404, format!("Unknown meta request {meta_path}").as_str())?
-    };
-    save.save_to(response)
 }
 
 async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body>> {
@@ -164,6 +153,10 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if env::args().find(|it| it == "--version").is_some() {
+        println!("{}", meta::debug_string());
+        return Ok(())
+    }
     println!("Ursa minor rises above the sky!");
     println!(
         "Launching with configuration: {:#?}",
