@@ -71,7 +71,7 @@ pub async fn respond_to(context: &mut RequestContext, path: &str, principal: JWT
                 .incr(&bucket, 1), 0, 3).await?;
             let bucket_usage = resp.remove(2);
             if let redis::Value::Int(bucket_usage_int) = bucket_usage {
-                if bucket_usage_int > global_application_config.rate_limit_bucket as i64 {
+                if bucket_usage_int > global_application_config.rate_limit_bucket as i64 && !global_application_config.allow_anonymous {
                     return make_error(429, "Rate limit exceeded").map(Some);
                 }
             } else {
