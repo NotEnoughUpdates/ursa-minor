@@ -36,6 +36,12 @@ pub struct JWTPrincipal {
     pub valid_since: MillisecondTimestamp,
 }
 
+impl JWTPrincipal {
+    pub fn ratelimit_key(&self) -> String {
+        format!("ratelimit:{}", self.id.as_u128())
+    }
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct MojangUser {
     pub id: Uuid,

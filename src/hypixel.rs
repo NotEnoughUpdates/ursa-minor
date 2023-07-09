@@ -38,6 +38,12 @@ pub struct Rule {
     // TODO: filters
 }
 
+impl Rule {
+    pub fn accumulated_statistics_key(&self) -> String {
+        format!("hypixel:accumulated:{}", self.http_path)
+    }
+}
+
 pub async fn respond_to(
     context: &mut RequestContext,
     path: &str,
@@ -73,7 +79,7 @@ pub async fn respond_to(
                 }
                 diagnostics_key.push_str(part);
             }
-            let bucket = format!("ratelimit:{}", principal.id.to_u128_le());
+            let bucket = principal.ratelimit_key();
             let mut resp = context
                 .redis_client
                 .send_packed_commands(
@@ -88,7 +94,7 @@ pub async fn respond_to(
                         .arg(global_application_config.rate_limit_lifespan.as_secs())
                         .arg("NX")
                         .incr(&bucket, 1)
-                        .incr(format!("hypixel:accumulated:request:{}", rule.http_path), 1),
+                        .incr(rule.accumulated_statistics_key(), 1),
                     0,
                     3,
                 )
