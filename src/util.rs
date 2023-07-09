@@ -16,11 +16,11 @@
 
 use hyper::http::request::Builder;
 use hyper::Uri;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 use std::ops::{Add, Deref, DerefMut};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use serde::{Deserialize, Serialize};
 use url::Url;
 
 // Sadly need to use Url for url encoding, since hypers uri does not have that capability
@@ -74,7 +74,8 @@ impl TryFrom<SystemTime> for MillisecondTimestamp {
 
     fn try_from(value: SystemTime) -> anyhow::Result<Self, Self::Error> {
         // Fails in ~580 billion years
-        Ok(MillisecondTimestamp(value.duration_since(UNIX_EPOCH)?.as_millis() as u64))
+        Ok(MillisecondTimestamp(
+            value.duration_since(UNIX_EPOCH)?.as_millis() as u64,
+        ))
     }
 }
-

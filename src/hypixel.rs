@@ -14,16 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::fmt::format;
-
 use hyper::{Body, Method, Request, Response};
-use redis::{Cmd, Pipeline};
+use redis::Pipeline;
 use serde::Deserialize;
 use url::Url;
 
-use crate::{global_application_config, make_error, RequestContext};
 use crate::mojang::JWTPrincipal;
 use crate::util::UrlForRequest;
+use crate::{global_application_config, make_error, RequestContext};
 
 #[derive(Deserialize, Debug)]
 pub struct Rule {
@@ -37,15 +35,22 @@ pub struct Rule {
     /// If there are extra or missing arguments this endpoint errors
     #[serde(rename = "query-arguments")]
     pub query_arguments: Vec<String>,
-
     // TODO: filters
 }
 
-pub async fn respond_to(context: &mut RequestContext, path: &str, principal: JWTPrincipal) -> anyhow::Result<Option<Response<Body>>> {
+pub async fn respond_to(
+    context: &mut RequestContext,
+    path: &str,
+    principal: JWTPrincipal,
+) -> anyhow::Result<Option<Response<Body>>> {
     for rule in &global_application_config.rules {
         if let Some(prefix) = path.strip_prefix(&rule.http_path) {
-            let parts = prefix.split('/').filter(|it| !it.is_empty()).collect::<Vec<_>>();
-            let mut query_parts: Vec<(String, String)> = Vec::with_capacity(rule.query_arguments.len());
+            let parts = prefix
+                .split('/')
+                .filter(|it| !it.is_empty())
+                .collect::<Vec<_>>();
+            let mut query_parts: Vec<(String, String)> =
+                Vec::with_capacity(rule.query_arguments.len());
             let mut part_iter = parts.iter();
             for query_argument in &rule.query_arguments {
                 let Some(next_part) = part_iter.next() else {
@@ -54,7 +59,11 @@ pub async fn respond_to(context: &mut RequestContext, path: &str, principal: JWT
                 query_parts.push((query_argument.clone(), (*next_part).to_owned()));
             }
             if let Some(extra) = part_iter.next() {
-                return make_error(400, format!("Superfluous query argument {:?}", extra).as_str()).map(Some);
+                return make_error(
+                    400,
+                    format!("Superfluous query argument {:?}", extra).as_str(),
+                )
+                .map(Some);
             }
             let url = Url::parse_with_params(rule.hypixel_path.as_str(), query_parts)?;
             let mut diagnostics_key = String::new();
@@ -65,13 +74,30 @@ pub async fn respond_to(context: &mut RequestContext, path: &str, principal: JWT
                 diagnostics_key.push_str(part);
             }
             let bucket = format!("ratelimit:{}", principal.id.to_u128_le());
-            let mut resp = context.redis_client.send_packed_commands(&Pipeline::new()
-                .zincr(format!("hypixel:request:{}", rule.http_path), diagnostics_key, 1)
-                .cmd("EXPIRE").arg(&bucket).arg(global_application_config.rate_limit_lifespan.as_secs()).arg("NX")
-                .incr(&bucket, 1), 0, 3).await?;
+            let mut resp = context
+                .redis_client
+                .send_packed_commands(
+                    Pipeline::new()
+                        .zincr(
+                            format!("hypixel:request:{}", rule.http_path),
+                            diagnostics_key,
+                            1,
+                        )
+                        .cmd("EXPIRE")
+                        .arg(&bucket)
+                        .arg(global_application_config.rate_limit_lifespan.as_secs())
+                        .arg("NX")
+                        .incr(&bucket, 1)
+                        .incr(format!("hypixel:accumulated:request:{}", rule.http_path), 1),
+                    0,
+                    3,
+                )
+                .await?;
             let bucket_usage = resp.remove(2);
             if let redis::Value::Int(bucket_usage_int) = bucket_usage {
-                if bucket_usage_int > global_application_config.rate_limit_bucket as i64 && !global_application_config.allow_anonymous {
+                if bucket_usage_int > global_application_config.rate_limit_bucket as i64
+                    && !global_application_config.allow_anonymous
+                {
                     return make_error(429, "Rate limit exceeded").map(Some);
                 }
             } else {
@@ -83,16 +109,21 @@ pub async fn respond_to(context: &mut RequestContext, path: &str, principal: JWT
                 .method(Method::GET)
                 .header("API-Key", &global_application_config.hypixel_token.0)
                 .body(Body::empty())?;
-            let hypixel_response = global_application_config.client.request(hypixel_request).await?;
+            let hypixel_response = global_application_config
+                .client
+                .request(hypixel_request)
+                .await?;
             // TODO: add temporary global backoff when hitting an error (especially 429)
             if hypixel_response.status().as_u16() != 200 {
                 return make_error(502, "Failed to request hypixel upstream").map(Some);
             }
-            return Ok(Some(Response::builder()
-                .header("Age", "0")
-                .header("Cache-Control", "public, s-maxage=60, max-age=300")
-                .header("Content-Type", "application/json")
-                .body(hypixel_response.into_body())?));
+            return Ok(Some(
+                Response::builder()
+                    .header("Age", "0")
+                    .header("Cache-Control", "public, s-maxage=60, max-age=300")
+                    .header("Content-Type", "application/json")
+                    .body(hypixel_response.into_body())?,
+            ));
         }
     }
     Ok(None)

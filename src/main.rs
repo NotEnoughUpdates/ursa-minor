@@ -26,9 +26,9 @@ use std::time::Duration;
 use anyhow::Context as _;
 use hmac::digest::KeyInit;
 use hmac::Hmac;
-use hyper::{Body, Client, Request, Response, Server};
 use hyper::client::HttpConnector;
 use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Client, Request, Response, Server};
 use hyper_tls::HttpsConnector;
 
 use crate::hypixel::Rule;
@@ -136,12 +136,14 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
         .with_context(|| "Could not parse port at URSA_PORT")?;
     let token_lifespan = config_var("TOKEN_LIFESPAN")
         .unwrap_or("3600".to_owned())
-        .parse::<u64>().with_context(|| "Could not parse token lifespan at URSA_TOKEN_LIFESPAN")?;
+        .parse::<u64>()
+        .with_context(|| "Could not parse token lifespan at URSA_TOKEN_LIFESPAN")?;
     let secret = config_var("SECRET")?;
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, Body>(https);
     let redis_url = config_var("REDIS_URL")?;
-    let rate_limit_lifespan = Duration::from_secs(config_var("RATE_LIMIT_TIMEOUT")?.parse::<u64>()?);
+    let rate_limit_lifespan =
+        Duration::from_secs(config_var("RATE_LIMIT_TIMEOUT")?.parse::<u64>()?);
     let rate_limit_bucket = config_var("RATE_LIMIT_BUCKET")?.parse::<u64>()?;
     Ok(GlobalApplicationContext {
         client,
@@ -159,9 +161,9 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    if env::args().find(|it| it == "--version").is_some() {
+    if env::args().any(|it| &it == "--version") {
         println!("{}", meta::debug_string());
-        return Ok(())
+        return Ok(());
     }
     println!("Ursa minor rises above the sky!");
     println!(

@@ -16,12 +16,14 @@
 
 use hyper::{Body, Response};
 
-use crate::{make_error, RequestContext, require_login};
+use crate::{make_error, require_login, RequestContext};
 
 pub const BUILD_VERSION: &str = env!("GIT_HASH");
 
-
-pub async fn respond_to_meta(req: RequestContext, meta_path: &str) -> anyhow::Result<Response<Body>> {
+pub async fn respond_to_meta(
+    req: RequestContext,
+    meta_path: &str,
+) -> anyhow::Result<Response<Body>> {
     if meta_path == "version" {
         return Ok(Response::builder()
             .status(200)
@@ -38,7 +40,9 @@ pub async fn respond_to_meta(req: RequestContext, meta_path: &str) -> anyhow::Re
     save.save_to(response)
 }
 
-
 pub fn debug_string() -> String {
-    format!("ursa-minor {} https://github.com/NotEnoughUpdates/ursa-minor/", BUILD_VERSION)
+    format!(
+        "ursa-minor {} https://github.com/NotEnoughUpdates/ursa-minor/",
+        BUILD_VERSION
+    )
 }
