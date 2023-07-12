@@ -18,7 +18,7 @@ use hyper::http::request::Builder;
 use hyper::Uri;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
-use std::ops::{Add, Deref, DerefMut};
+use std::ops::{Add, Deref, DerefMut, Sub};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
@@ -69,6 +69,14 @@ impl Add<Duration> for MillisecondTimestamp {
     }
 }
 
+impl Sub<MillisecondTimestamp> for MillisecondTimestamp {
+    type Output = Duration;
+
+    fn sub(self, rhs: MillisecondTimestamp) -> Self::Output {
+        Duration::from_millis(self.0 - rhs.0)
+    }
+}
+
 impl TryFrom<SystemTime> for MillisecondTimestamp {
     type Error = anyhow::Error;
 
@@ -77,5 +85,11 @@ impl TryFrom<SystemTime> for MillisecondTimestamp {
         Ok(MillisecondTimestamp(
             value.duration_since(UNIX_EPOCH)?.as_millis() as u64,
         ))
+    }
+}
+
+impl MillisecondTimestamp {
+    pub fn now() -> anyhow::Result<Self> {
+        return Ok(MillisecondTimestamp::try_from(std::time::SystemTime::now())?);
     }
 }

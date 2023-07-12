@@ -89,17 +89,26 @@ async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body
 }
 
 async fn wrap_error(context: RequestContext) -> anyhow::Result<Response<Body>> {
-    match respond_to(context).await {
-        Ok(x) => Ok(x),
+    let start = std::time::Instant::now();
+    let resp = respond_to(context).await;
+    let end = std::time::Instant::now();
+    let time_passed = end - start;
+    let mut final_resp = match resp {
+        Ok(x) => x,
         Err(e) => {
             let error_id = uuid::Uuid::new_v4();
             eprintln!("Error id: {error_id}:");
             eprintln!("{e:#?}");
-            Ok(Response::builder()
+            Response::builder()
                 .status(500)
-                .body(format!("500 Internal Error\n\nError id: {}", error_id).into())?)
+                .body(format!("500 Internal Error\n\nError id: {}", error_id).into())?
         }
-    }
+    };
+    final_resp.headers_mut().insert(
+        "x-ursa-timings",
+        format!("{}ns", time_passed.as_nanos()).try_into()?,
+    );
+    return Ok(final_resp);
 }
 
 fn config_var(name: &str) -> anyhow::Result<String> {
