@@ -33,20 +33,10 @@ async fn respond_to_statistics(mut req: RequestContext) -> anyhow::Result<Respon
     for rule in &global_application_config.rules {
         pipe.get(rule.accumulated_statistics_key());
     }
-    let response = req
-        .redis_client
-        .send_packed_commands(&pipe, 0, global_application_config.rules.len())
-        .await?;
+    let response: Vec<Option<u64>> = pipe.query_async(&mut req.redis_client.0).await?;
     let mut request_total = HashMap::new();
     for (value, rule) in response.iter().zip(global_application_config.rules.iter()) {
-        let calls = if let redis::Value::Int(val) = value {
-            *val
-        } else if value == &redis::Value::Nil {
-            0
-        } else {
-            return make_error(500, "Invalid redis response");
-        };
-        request_total.insert(rule.http_path.clone(), calls as u64);
+        request_total.insert(rule.http_path.clone(), value.unwrap_or(0));
     }
     return Ok(Response::builder()
         .header("content-type", "application/json")
