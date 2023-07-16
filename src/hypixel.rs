@@ -80,34 +80,25 @@ pub async fn respond_to(
                 diagnostics_key.push_str(part);
             }
             let bucket = principal.ratelimit_key();
-            let mut resp = context
-                .redis_client
-                .send_packed_commands(
-                    Pipeline::new()
-                        .zincr(
-                            format!("hypixel:request:{}", rule.http_path),
-                            diagnostics_key,
-                            1,
-                        )
-                        .cmd("EXPIRE")
-                        .arg(&bucket)
-                        .arg(global_application_config.rate_limit_lifespan.as_secs())
-                        .arg("NX")
-                        .incr(&bucket, 1)
-                        .incr(rule.accumulated_statistics_key(), 1),
-                    0,
-                    3,
+            let resp: ((), (), u64, ()) = Pipeline::new()
+                .zincr(
+                    format!("hypixel:request:{}", rule.http_path),
+                    diagnostics_key,
+                    1,
                 )
+                .cmd("EXPIRE")
+                .arg(&bucket)
+                .arg(global_application_config.rate_limit_lifespan.as_secs())
+                .arg("NX")
+                .incr(&bucket, 1)
+                .incr(rule.accumulated_statistics_key(), 1)
+                .query_async(&mut context.redis_client.0)
                 .await?;
-            let bucket_usage = resp.remove(2);
-            if let redis::Value::Int(bucket_usage_int) = bucket_usage {
-                if bucket_usage_int > global_application_config.rate_limit_bucket as i64
-                    && !global_application_config.allow_anonymous
-                {
-                    return make_error(429, "Rate limit exceeded").map(Some);
-                }
-            } else {
-                return make_error(500, "Redis failure").map(Some);
+            let bucket_usage = resp.2;
+            if bucket_usage > global_application_config.rate_limit_bucket
+                && !global_application_config.allow_anonymous
+            {
+                return make_error(429, "Rate limit exceeded").map(Some);
             }
 
             let hypixel_request = Request::builder()
