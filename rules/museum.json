@@ -1,0 +1,7 @@
+{
+  "http-path": "museum",
+  "hypixel-path": "https://api.hypixel.net/skyblock/museum",
+  "query-arguments": [
+    "profile"
+  ]
+}
