@@ -10,10 +10,7 @@ The server is configured via environment variables. See `.env.example` for expla
 Environment variables in `.env` get automatically loaded on startup. Rules are resolved relative to the working
 directory.
 
-### Missing features
-
-- Rate-limits on users (using redis `EXPIRE`)
-- Reporting diagnostics (aggregated call statistics)
+Also check out [ursa-minor-stat-viewer](https://github.com/romangraef/ursa-minor-stat-viewer-stats) for stat aggregation.
 
 ## Client Usage
 
