@@ -1,4 +1,5 @@
 // Ursa Minor - A Hypixel API proxy
+//
 // Copyright (C) 2023 Linnea Gräf
 //
 // This program is free software: you can redistribute it and/or modify
@@ -17,13 +18,13 @@
 #![feature(lazy_cell)]
 #![feature(adt_const_params)]
 #![allow(incomplete_features)]
-extern crate core;
 
 use std::env;
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use clap::Parser;
 use hmac::digest::KeyInit;
 use hmac::Hmac;
 use hyper::client::HttpConnector;
@@ -33,7 +34,7 @@ use hyper_tls::HttpsConnector;
 
 use crate::hypixel::Rule;
 use crate::meta::respond_to_meta;
-use crate::util::Obscure;
+use crate::util::{MillisecondTimestamp, Obscure};
 
 pub mod hypixel;
 pub mod meta;
@@ -168,12 +169,51 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     })
 }
 
+#[derive(Debug, clap::Subcommand)]
+enum Commands {
+    #[command()]
+    RunServer,
+    #[command()]
+    GenerateToken {
+        #[arg(short, long)]
+        admin: bool,
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+    #[command()]
+    Version,
+}
+
+#[derive(clap::Parser, Debug)]
+#[command(author = "Linnea Gräf", name = "ursa-minor", version = env!("GIT_HASH"))]
+struct Args {
+    #[command(subcommand)]
+    command: Commands,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    if env::args().any(|it| &it == "--version") {
-        println!("{}", meta::debug_string());
-        return Ok(());
+    let args = Args::parse();
+    match args.command {
+        Commands::Version => {
+            println!("{}", meta::debug_string());
+        }
+        Commands::RunServer => run_server().await?,
+        Commands::GenerateToken { admin, name } => {
+            let principal = mojang::JWTPrincipal {
+                id: mojang::make_null_uuid(),
+                name: name.unwrap_or("generated".to_owned()),
+                valid_until: MillisecondTimestamp(u64::MAX),
+                valid_since: MillisecondTimestamp(0),
+                superuser: admin,
+            };
+            println!("Generated token: {}", principal.as_token()?);
+        }
     }
+    Ok(())
+}
+
+async fn run_server() -> anyhow::Result<()> {
     println!("Ursa minor rises above the sky!");
     println!(
         "Launching with configuration: {:#?}",

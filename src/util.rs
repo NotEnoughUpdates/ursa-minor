@@ -93,3 +93,6 @@ impl MillisecondTimestamp {
         return Ok(MillisecondTimestamp::try_from(std::time::SystemTime::now())?);
     }
 }
+pub fn pure_false() -> bool {
+    false
+}

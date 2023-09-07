@@ -5,6 +5,10 @@ edition = "2021"
 
 [dependencies]
 
+[dependencies.clap]
+version = "*"
+features = ["derive"]
+
 [dependencies.dotenv]
 version = "*"
 

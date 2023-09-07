@@ -25,8 +25,12 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
-use crate::util::{MillisecondTimestamp, UrlForRequest};
+use crate::util::{pure_false, MillisecondTimestamp, UrlForRequest};
 use crate::{global_application_config, make_error, RequestContext};
+
+pub(crate) fn make_null_uuid() -> Uuid {
+    Uuid::from_u128(0)
+}
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct JWTPrincipal {
@@ -34,11 +38,20 @@ pub struct JWTPrincipal {
     pub name: String,
     pub valid_until: MillisecondTimestamp,
     pub valid_since: MillisecondTimestamp,
+    #[serde(default = "pure_false")]
+    pub superuser: bool,
 }
 
 impl JWTPrincipal {
     pub fn ratelimit_key(&self) -> String {
         format!("ratelimit:{}", self.id.as_u128())
+    }
+
+    pub fn as_token(&self) -> anyhow::Result<String> {
+        Ok(SignWithKey::sign_with_key(
+            self,
+            &global_application_config.key,
+        )?)
     }
 }
 
@@ -59,7 +72,7 @@ impl SaveOnExit {
     pub fn save_to(&self, mut response: Response<Body>) -> anyhow::Result<Response<Body>> {
         let headers = response.headers_mut();
         if let SaveOnExit::Save { principal } = self {
-            let signed = SignWithKey::sign_with_key(principal, &global_application_config.key)?;
+            let signed = principal.as_token()?;
             headers.append("x-ursa-token", HeaderValue::from_str(&signed)?);
             headers.append(
                 "x-ursa-expires",
@@ -91,10 +104,11 @@ pub async fn require_login(
         return Ok(Ok((
             SaveOnExit::DontSave,
             JWTPrincipal {
-                id: Uuid::from_u128(0),
+                id: make_null_uuid(),
                 name: "CoolGuy123".to_owned(),
                 valid_until: MillisecondTimestamp(u64::MAX),
                 valid_since: MillisecondTimestamp(0),
+                superuser: false,
             },
         )));
     }
@@ -127,7 +141,12 @@ pub async fn require_login(
 }
 
 async fn verify_existing_login(req: &RequestContext) -> anyhow::Result<Option<JWTPrincipal>> {
-    let Some(token) = req.request.headers().get("x-ursa-token").and_then(|it| it.to_str().ok()) else {
+    let Some(token) = req
+        .request
+        .headers()
+        .get("x-ursa-token")
+        .and_then(|it| it.to_str().ok())
+    else {
         return Ok(None);
     };
     let claims: JWTPrincipal =
@@ -145,10 +164,20 @@ async fn verify_login_attempt(
     // this is a flawed way of doing logins, but I do not want to expend the cryptographical resources
     // to make it less flawed and everyone else does it the same way as well, and this has not become
     // a widely used attack
-    let Some(username) = req.request.headers().get("x-ursa-username").and_then(|it| it.to_str().ok()) else {
+    let Some(username) = req
+        .request
+        .headers()
+        .get("x-ursa-username")
+        .and_then(|it| it.to_str().ok())
+    else {
         return Ok(Err(make_error(400, "Missing username to authenticate")?));
     };
-    let Some(server_id) = req.request.headers().get("x-ursa-serverid").and_then(|it| it.to_str().ok()) else {
+    let Some(server_id) = req
+        .request
+        .headers()
+        .get("x-ursa-serverid")
+        .and_then(|it| it.to_str().ok())
+    else {
         return Ok(Err(make_error(400, "Missing serverid to authenticate")?));
     };
     let mojang_request = Request::builder()
@@ -172,5 +201,6 @@ async fn verify_login_attempt(
         name: user.name,
         valid_until: right_now + global_application_config.default_token_duration,
         valid_since: right_now,
+        superuser: false,
     }))
 }
