@@ -70,6 +70,15 @@ fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Bod
 
 async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body>> {
     let path = &context.request.uri().path().to_owned();
+    let user_agent = context
+        .request
+        .headers()
+        .get("user-agent")
+        .map_or_else(|| Ok("none"), |x| x.to_str())?
+        .to_owned();
+    redis::Cmd::zincr("user-agent", user_agent, 1)
+        .query_async(&mut context.redis_client.0)
+        .await?;
     if path == "/" {
         return Ok(Response::builder()
             .status(302)
