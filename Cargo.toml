@@ -3,6 +3,11 @@ name = "ursa-minor"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+neu = []
+default = ["neu"]
+
+
 [dependencies]
 
 [dependencies.clap]
@@ -28,7 +33,7 @@ version = "*"
 
 [dependencies.tokio]
 version = "*"
-features = ["rt-multi-thread", "macros", "signal"]
+features = ["rt-multi-thread", "macros", "signal", "fs"]
 
 [dependencies.anyhow]
 version = "*"

@@ -41,6 +41,9 @@ pub mod meta;
 pub mod mojang;
 pub mod util;
 
+#[cfg(feature = "neu")]
+pub mod neu;
+
 #[derive(Debug)]
 pub struct RequestContext {
     redis_client: Obscure<redis::aio::ConnectionManager, "ConnectionManager">,
@@ -95,6 +98,15 @@ async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body
             return save.save_to(resp);
         }
     }
+
+    #[cfg(feature = "neu")]
+    if let Some(neu_path) = path.strip_prefix("/v1/neu/") {
+        let (save, principal) = require_login!(context);
+        if let Some(resp) = neu::respond_to(context, neu_path, principal).await? {
+            return save.save_to(resp);
+        }
+    }
+
     return make_error(404, format!("Unknown request path {}", path).as_str());
 }
 
