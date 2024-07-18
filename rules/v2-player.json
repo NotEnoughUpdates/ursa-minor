@@ -1,0 +1,7 @@
+{
+  "http-path": "v2/player",
+  "hypixel-path": "https://api.hypixel.net/v2/player",
+  "query-arguments": [
+    "uuid"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "http-path": "v2/guild",
+  "hypixel-path": "https://api.hypixel.net/v2/guild",
+  "query-arguments": [
+    "player"
+  ]
+}
