@@ -1,0 +1,7 @@
+{
+  "http-path": "v2/garden",
+  "hypixel-path": "https://api.hypixel.net/v2/skyblock/garden",
+  "query-arguments": [
+    "profile"
+  ]
+}
