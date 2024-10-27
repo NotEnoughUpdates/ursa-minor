@@ -60,7 +60,11 @@ pub async fn respond_to(
             let mut part_iter = parts.iter();
             for query_argument in &rule.query_arguments {
                 let Some(next_part) = part_iter.next() else {
-                    return make_error(400, format!("Missing query argument {}", query_argument).as_str()).map(Some);
+                    return make_error(
+                        400,
+                        format!("Missing query argument {}", query_argument).as_str(),
+                    )
+                    .map(Some);
                 };
                 query_parts.push((query_argument.clone(), (*next_part).to_owned()));
             }

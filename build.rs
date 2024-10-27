@@ -16,10 +16,15 @@
 
 use std::process::Command;
 fn main() {
-    let output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .unwrap();
-    let git_hash = String::from_utf8(output.stdout).unwrap();
+    let git_hash = if let Ok(git_hash) = std::env::var("GIT_HASH") {
+        git_hash
+    } else {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let git_hash = String::from_utf8(output.stdout).unwrap();
+        git_hash
+    };
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 }
