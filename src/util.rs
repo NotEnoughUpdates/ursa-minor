@@ -14,8 +14,10 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use chrono::Utc;
 use hyper::http::request::Builder;
 use hyper::Uri;
+use influxdb::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 use std::ops::{Add, Deref, DerefMut, Sub};
@@ -61,6 +63,17 @@ impl<T, const L: &'static str> DerefMut for Obscure<T, L> {
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
 pub struct MillisecondTimestamp(pub u64);
 
+impl From<MillisecondTimestamp> for Timestamp {
+    fn from(value: MillisecondTimestamp) -> Self {
+        chrono::DateTime::<Utc>::from(SystemTime::from(value)).into()
+    }
+}
+impl From<Timestamp> for MillisecondTimestamp {
+    fn from(value: Timestamp) -> Self {
+        let datetime: chrono::DateTime<Utc> = value.into();
+        SystemTime::from(datetime).into()
+    }
+}
 impl Add<Duration> for MillisecondTimestamp {
     type Output = MillisecondTimestamp;
 
@@ -77,20 +90,30 @@ impl Sub<MillisecondTimestamp> for MillisecondTimestamp {
     }
 }
 
-impl TryFrom<SystemTime> for MillisecondTimestamp {
-    type Error = anyhow::Error;
-
-    fn try_from(value: SystemTime) -> anyhow::Result<Self, Self::Error> {
+impl From<MillisecondTimestamp> for SystemTime {
+    fn from(value: MillisecondTimestamp) -> Self {
+        UNIX_EPOCH + Duration::from_millis(value.0)
+    }
+}
+impl From<SystemTime> for MillisecondTimestamp {
+    fn from(value: SystemTime) -> Self {
         // Fails in ~580 billion years
-        Ok(MillisecondTimestamp(
-            value.duration_since(UNIX_EPOCH)?.as_millis() as u64,
-        ))
+        MillisecondTimestamp(value.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
     }
 }
 
 impl MillisecondTimestamp {
+    pub fn wait_time_or_zero(&self) -> Duration {
+        let now = Self::now().unwrap();
+        if now >= *self {
+            Duration::ZERO
+        } else {
+            *self - now
+        }
+    }
+
     pub fn now() -> anyhow::Result<Self> {
-        return Ok(MillisecondTimestamp::try_from(std::time::SystemTime::now())?);
+        Ok(MillisecondTimestamp::from(SystemTime::now()))
     }
 }
 pub fn pure_false() -> bool {

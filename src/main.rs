@@ -23,6 +23,9 @@ use std::env;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use crate::hypixel::Rule;
+use crate::meta::respond_to_meta;
+use crate::util::{MillisecondTimestamp, Obscure};
 use anyhow::Context as _;
 use clap::Parser;
 use hmac::digest::KeyInit;
@@ -31,18 +34,23 @@ use hyper::client::HttpConnector;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
 use hyper_tls::HttpsConnector;
-
-use crate::hypixel::Rule;
-use crate::meta::respond_to_meta;
-use crate::util::{MillisecondTimestamp, Obscure};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 pub mod hypixel;
 pub mod meta;
 pub mod mojang;
 pub mod util;
 
+pub mod built_info {
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
 #[cfg(feature = "neu")]
 pub mod neu;
+
+#[cfg(feature = "lbin")]
+pub mod lbin;
 
 #[derive(Debug)]
 pub struct RequestContext {
@@ -63,6 +71,8 @@ pub struct GlobalApplicationContext {
     default_token_duration: Duration,
     rate_limit_lifespan: Duration,
     rate_limit_bucket: u64,
+    #[cfg(feature = "influxdb")]
+    influx_url: String,
 }
 
 fn make_error(status_code: u16, error_text: &str) -> anyhow::Result<Response<Body>> {
@@ -173,6 +183,8 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, Body>(https);
     let redis_url = config_var("REDIS_URL")?;
+    #[cfg(feature = "influxdb")]
+    let influx_url = config_var("INFLUX_URL")?;
     let rate_limit_lifespan =
         Duration::from_secs(config_var("RATE_LIMIT_TIMEOUT")?.parse::<u64>()?);
     let rate_limit_bucket = config_var("RATE_LIMIT_BUCKET")?.parse::<u64>()?;
@@ -187,6 +199,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
         default_token_duration: Duration::from_secs(token_lifespan),
         rate_limit_lifespan,
         rate_limit_bucket,
+        influx_url
     })
 }
 
@@ -212,7 +225,7 @@ struct Args {
     command: Commands,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     match args.command {
@@ -256,18 +269,58 @@ async fn run_server() -> anyhow::Result<()> {
     });
     let server = Server::bind(&addr).serve(service);
     println!("Now listening at {}", addr);
-    let mut s = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut handles = vec![];
+    let shutdown = CancellationToken::new();
+    handles.extend(setup_shutdown_watchers(&shutdown));
+    #[cfg(feature = "lbin")]
+    handles.push(lbin::start_loop(&shutdown));
     tokio::select! {
-        _ = s.recv() => {
-            println!("Terminated! It's time to say goodbye.");
-        }
-        it = tokio::signal::ctrl_c() => {
-            it?;
-            println!("Interrupted! It's time to say goodbye.");
-        }
         it = server =>{
             it?;
         }
+        _ = shutdown.cancelled() => {}
+    }
+    for x in handles {
+        x.await?;
     }
     Ok(())
+}
+
+fn setup_shutdown_watchers(token: &CancellationToken) -> [JoinHandle<()>; 2] {
+    [
+        {
+            let shutdown = token.clone();
+            tokio::spawn(async move {
+                #[cfg(unix)]
+                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                    Ok(mut signal) => {
+                        tokio::select! {
+                            _ = signal.recv() => {
+                                println!("Terminated! It's time to say goodbye.");
+                                shutdown.cancel()
+                            }
+                            _ = shutdown.cancelled() => {}
+                        }
+                    }
+                    Err(_) => {
+                        eprintln!(
+                        "Could not set SIGTERM handler. Expect things to get a bit dicey on exit."
+                    );
+                    }
+                }
+            })
+        },
+        {
+            let shutdown = token.clone();
+            tokio::spawn(async move {
+                if let Err(_) = tokio::signal::ctrl_c().await {
+                    eprintln!(
+                        "Could not set CTRL+C handler. Expect things to get a bit dicey on exit."
+                    );
+                } else {
+                    shutdown.cancel();
+                }
+            })
+        },
+    ]
 }

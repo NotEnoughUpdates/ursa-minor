@@ -4,6 +4,14 @@
 
 ## Server Usage
 
+### Software
+
+Ursa Minor may require the following software:
+
+- A http reverse proxy for encryption, e.g. [caddy](https://caddyserver.com/)
+- A redis compatible kv store, e.g. [valkey](https://valkey.io/)
+- An InfluxDB instance, lbin mode only [influxdb](https://www.influxdata.com/)
+
 ### Configuration
 
 The server is configured via environment variables. See `.env.example` for explanations what each variable does.

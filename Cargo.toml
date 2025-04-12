@@ -5,10 +5,28 @@ edition = "2021"
 
 [features]
 neu = []
-default = ["neu"]
+lbin = ["influxdb"]
+influxdb = ["dep:influxdb"]
+default = ["neu", "lbin"]
 
+[build-dependencies]
+built = "0.7.7"
 
 [dependencies]
+base64 = "0.22.1"
+chrono = "0.4.40"
+futures = "0.3.31"
+hematite-nbt = "0.5.2"
+tokio-util = "0.7.14"
+
+[dependencies.influxdb]
+version = "0.7.2"
+features = ["derive"]
+optional = true
+
+[dependencies.serde_with]
+version = "3.12.0"
+features = ["base64"]
 
 [dependencies.clap]
 version = "*"
@@ -26,7 +44,7 @@ features = ["full"]
 
 [dependencies.serde]
 version = "*"
-features = ["derive"]
+features = ["derive", "rc"]
 
 [dependencies.url]
 version = "*"

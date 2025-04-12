@@ -67,7 +67,8 @@ pub async fn respond_to_meta(
 
 pub fn debug_string() -> String {
     format!(
-        "ursa-minor {} https://github.com/NotEnoughUpdates/ursa-minor/",
-        BUILD_VERSION
+        "ursa-minor {} https://github.com/NotEnoughUpdates/ursa-minor/\nfeatures: {}",
+        BUILD_VERSION,
+        crate::built_info::FEATURES_STR
     )
 }

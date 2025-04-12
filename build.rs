@@ -16,6 +16,7 @@
 
 use std::process::Command;
 fn main() {
+    built::write_built_file().expect("Failed to acquire build-time information");
     let git_hash = if let Ok(git_hash) = std::env::var("GIT_HASH") {
         git_hash
     } else {
