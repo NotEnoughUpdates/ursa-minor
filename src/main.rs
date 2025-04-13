@@ -18,6 +18,7 @@
 #![feature(lazy_cell)]
 #![feature(adt_const_params)]
 #![allow(incomplete_features)]
+extern crate core;
 
 use std::env;
 use std::net::SocketAddr;

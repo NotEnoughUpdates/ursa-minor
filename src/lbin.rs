@@ -1,17 +1,15 @@
 use crate::global_application_config;
 use crate::util::{MillisecondTimestamp, UrlForRequest};
 use base64::Engine;
-use futures::StreamExt;
-use hyper::body::Buf;
+use futures::{AsyncReadExt, StreamExt};
 use hyper::{Body, Method, Request, StatusCode};
 use influxdb::InfluxDbWriteable;
-use nbt::Blob;
-use serde::{Deserialize, Serialize};
-use serde_with::base64::Base64;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
-use std::cmp::min;
+use simdnbt::owned::{BaseNbt, NbtCompound, NbtTag};
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -22,6 +20,16 @@ use uuid::Uuid;
 
 type A<T> = Arc<[T]>;
 type S = Arc<str>;
+#[derive(Deserialize, Serialize, Default, Debug)]
+struct AuctionPage {
+    #[serde(rename = "lastUpdated")]
+    last_updated: Option<MillisecondTimestamp>,
+    page: u32,
+    #[serde(rename = "totalPages")]
+    total_pages: u32,
+    auctions: A<Auction>,
+}
+
 #[serde_as]
 #[derive(Deserialize, Serialize, Debug)]
 struct Auction {
@@ -48,42 +56,35 @@ struct Auction {
     category: S,
 }
 
-#[derive(Deserialize, Serialize, Default, Debug)]
-struct AuctionPage {
-    #[serde(rename = "lastUpdated")]
-    last_updated: Option<MillisecondTimestamp>,
-    page: u32,
-    #[serde(rename = "totalPages")]
-    total_pages: u32,
-    auctions: A<Auction>,
+macro_rules! nbt_use {
+    ($o:expr, $n:expr, $t:ident) => {
+        match ::simdnbt::owned::NbtCompound::get($o, $n) {
+            ::std::option::Option::Some(::simdnbt::owned::NbtTag::$t(it)) => {
+                ::std::option::Option::Some(it)
+            }
+            _ => return ::std::option::Option::None,
+        }
+    };
 }
+struct ItemStack<'a>(&'a NbtCompound);
 
-#[derive(Serialize, Deserialize)]
-struct ItemHolder {
-    i: Vec<ItemStack>,
+impl<'a> ItemStack<'a> {
+    fn new(compound: &'a NbtCompound) -> Self {
+        Self(compound)
+    }
+    pub fn extra_attributes(&self) -> Option<ExtraAttributes<'a>> {
+        let tag = nbt_use!(self.0, "tag", Compound)?;
+        let extra_attr = nbt_use!(tag, "ExtraAttributes", Compound)?;
+        Some(ExtraAttributes(extra_attr))
+    }
 }
-const fn pure1() -> u8 {
-    1
-}
-#[derive(Serialize, Deserialize, Debug)]
-struct ItemStack {
-    #[serde(rename = "Damage")]
-    damage: u16,
-    id: u16,
-    #[serde(rename = "Count")]
-    count: u8,
-    tag: Tag,
-}
+struct ExtraAttributes<'a>(&'a NbtCompound);
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Tag {
-    #[serde(rename = "ExtraAttributes", default)]
-    extra_attributes: ExtraAttributes,
-}
-#[derive(Serialize, Deserialize, Debug, Default)]
-struct ExtraAttributes {
-    id: Option<S>,
-    uuid: Option<Uuid>,
+impl<'a> ExtraAttributes<'a> {
+    pub fn id(&self) -> Option<S> {
+        let str = nbt_use!(self.0, "id", String)?;
+        Some(str.to_str().into())
+    }
 }
 
 impl Auction {
@@ -94,18 +95,40 @@ impl Auction {
         }
     }
 
-    fn item_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        Ok(base64::engine::general_purpose::STANDARD
-            .decode(self.item_bytes_compressed.as_ref().as_bytes())?)
+    fn item_bytes(&self) -> anyhow::Result<A<u8>> {
+        let base64_decoded = base64::engine::general_purpose::STANDARD.decode(
+            self.item_bytes_compressed
+                .as_ref()
+                .as_bytes(),
+        )?;
+
+        Ok(base64_decoded.into())
     }
-    fn item_stack(&self) -> anyhow::Result<ItemStack> {
-        // TODO: from_reader is sometimes quite slow. maybe parse into a unzipped byte array first and then decode via nbt::de::from_reader directly.
-        let mut nbt: ItemHolder = nbt::de::from_gzip_reader(Cursor::new(self.item_bytes()?))?;
-        Ok(nbt.i.pop().ok_or_else(|| anyhow::anyhow!(""))?)
+    pub async fn raw_nbt(&self) -> anyhow::Result<BaseNbt> {
+        let mut ungzipped = Vec::new();
+        let input = self.item_bytes()?;
+        let mut decoder = flate2::read::GzDecoder::new(input.as_ref());
+        decoder.read_to_end(&mut ungzipped)?;
+        let mut c: Cursor<&[u8]> = Cursor::new(ungzipped.as_slice());
+        let tag = simdnbt::owned::read(&mut c)?;
+        Ok(tag.unwrap())
     }
-    fn debug_nbt(&self) -> anyhow::Result<nbt::Blob> {
-        let nbt: nbt::Blob = nbt::de::from_gzip_reader(Cursor::new(self.item_bytes()?))?;
-        Ok(nbt)
+    async fn item_stack(&self) -> anyhow::Result<NbtCompound> {
+        let nbt = self.raw_nbt().await?;
+        match nbt.as_compound().take("i") {
+            None => anyhow::bail!("Missing root i tag"),
+            Some(NbtTag::List(list)) => {
+                let tag = list
+                    .into_compounds()
+                    .ok_or(anyhow::anyhow!("Expected compound tag"))?
+                    .swap_remove(0);
+                Ok(tag)
+            }
+            _ => {
+                // TODO: 'a borrow a lot of things
+                anyhow::bail!("Misshapen root tag");
+            }
+        }
     }
 }
 
@@ -146,7 +169,11 @@ async fn item_ah_scan_fallible(
     let initial_page = request_ah_page(0).await?;
 
     let mut all_prices: Vec<(A<S>, f64)> = vec![];
-    all_prices.extend(process_page(&initial_page, last_full_scan)?.into_iter());
+    all_prices.extend(
+        process_page(&initial_page, last_full_scan)
+            .await?
+            .into_iter(),
+    );
     let pages =
         futures::stream::iter((1..initial_page.total_pages).map(|page| request_ah_page(page)))
             .buffer_unordered(8)
@@ -155,7 +182,7 @@ async fn item_ah_scan_fallible(
     println!("Web requests completed");
     for page in pages {
         let page = page?;
-        all_prices.extend(process_page(&page, last_full_scan)?.into_iter());
+        all_prices.extend(process_page(&page, last_full_scan).await?.into_iter());
     }
     println!("Prices aggregated.");
 
@@ -181,7 +208,6 @@ async fn update_prices(all_prices: &[(impl AsRef<[S]>, f64)]) -> anyhow::Result<
             *original = original.min(*price)
         }
     }
-    println!("Prices bucketed");
     let ts = MillisecondTimestamp::now()?;
     let influx = influxdb::Client::new(&global_application_config.influx_url, "prices");
     let readings: Vec<_> = prices
@@ -200,7 +226,7 @@ async fn update_prices(all_prices: &[(impl AsRef<[S]>, f64)]) -> anyhow::Result<
     Ok(())
 }
 
-fn process_page(
+async fn process_page(
     page: &AuctionPage,
     last_full_scan: Option<MillisecondTimestamp>,
 ) -> anyhow::Result<Vec<(A<S>, f64)>> {
@@ -209,9 +235,9 @@ fn process_page(
         if !auction.needs_processing(last_full_scan) {
             continue;
         }
-        match auction.item_stack() {
+        match auction.item_stack().await {
             Ok(item_stack) => {
-                let bucket = find_buckets(&item_stack);
+                let bucket = find_buckets(&ItemStack::new(&item_stack));
                 if auction.bin {
                     v.push((bucket, auction.starting_bid));
                 } else {
@@ -223,7 +249,7 @@ fn process_page(
                     "Could not parse item with auction id {}: {:#}; {:?}",
                     auction.uuid,
                     err,
-                    auction.debug_nbt().ok()
+                    auction.raw_nbt().await
                 );
             }
         }
@@ -232,8 +258,12 @@ fn process_page(
 }
 
 fn find_buckets(stack: &ItemStack) -> A<S> {
-    let attr = &stack.tag.extra_attributes;
-    let Some(id) = &attr.id else { return [].into() };
+    let Some(attr) = &stack.extra_attributes() else {
+        return [].into();
+    };
+    let Some(id) = &attr.id() else {
+        return [].into();
+    };
     let mut ids: Vec<S> = vec![];
     ids.push(id.clone());
     ids.into()
@@ -244,9 +274,12 @@ async fn item_ah_scan(last_full_scan: &mut Option<MillisecondTimestamp>) -> Dura
         Ok(timestamp) => {
             *last_full_scan = Some(timestamp);
             let d = Duration::from_secs(65);
-            let w = (timestamp + d);
+            let w = timestamp + d;
             let c = w.wait_time_or_zero();
-            println!("Calculated wait. Ts: {timestamp:?} + {d:?} = {w:?}. Wait: {c:?}. Now: {:?}", MillisecondTimestamp::now());
+            println!(
+                "Calculated wait. Ts: {timestamp:?} + {d:?} = {w:?}. Wait: {c:?}. Now: {:?}",
+                MillisecondTimestamp::now()
+            );
             c
         }
         Err(er) => {

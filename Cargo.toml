@@ -16,8 +16,13 @@ built = "0.7.7"
 base64 = "0.22.1"
 chrono = "0.4.40"
 futures = "0.3.31"
-hematite-nbt = "0.5.2"
+simdnbt = "0.7.1"
 tokio-util = "0.7.14"
+
+[dependencies.flate2]
+version = "1.1.1"
+default-features = false
+features = ["zlib-rs"]
 
 [dependencies.influxdb]
 version = "0.7.2"
