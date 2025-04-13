@@ -36,7 +36,9 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
 use hyper_tls::HttpsConnector;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 
 pub mod hypixel;
 pub mod meta;
@@ -122,16 +124,15 @@ async fn respond_to(mut context: RequestContext) -> anyhow::Result<Response<Body
 }
 
 async fn wrap_error(context: RequestContext) -> anyhow::Result<Response<Body>> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let resp = respond_to(context).await;
-    let end = std::time::Instant::now();
+    let end = Instant::now();
     let time_passed = end - start;
     let mut final_resp = match resp {
         Ok(x) => x,
         Err(e) => {
             let error_id = uuid::Uuid::new_v4();
-            eprintln!("Error id: {error_id}:");
-            eprintln!("{e:#?}");
+            error!(%e, "Error id: {error_id}:");
             Response::builder()
                 .status(500)
                 .body(format!("500 Internal Error\n\nError id: {}", error_id).into())?
@@ -158,9 +159,6 @@ static global_application_config: std::sync::LazyLock<GlobalApplicationContext> 
     std::sync::LazyLock::new(|| init_config().unwrap());
 
 fn init_config() -> anyhow::Result<GlobalApplicationContext> {
-    if let Ok(path) = dotenv::dotenv() {
-        println!("Loaded dotenv from {}", path.to_str().unwrap_or("?"));
-    }
     let hypixel_token = config_var("HYPIXEL_TOKEN")?;
     let allow_anonymous = config_var("ANONYMOUS").unwrap_or("false".to_owned()) == "true";
     let rules = config_var("RULES")?
@@ -200,7 +198,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
         default_token_duration: Duration::from_secs(token_lifespan),
         rate_limit_lifespan,
         rate_limit_bucket,
-        influx_url
+        influx_url,
     })
 }
 
@@ -226,8 +224,14 @@ struct Args {
     command: Commands,
 }
 
+fn main() -> anyhow::Result<()> {
+    if let Ok(path) = dotenv::dotenv() {
+        println!("Loaded dotenv from {}", path.to_str().unwrap_or("?"));
+    }
+    amain()
+}
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
-async fn main() -> anyhow::Result<()> {
+async fn amain() -> anyhow::Result<()> {
     let args = Args::parse();
     match args.command {
         Commands::Version => {
@@ -249,8 +253,12 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_server() -> anyhow::Result<()> {
-    println!("Ursa minor rises above the sky!");
-    println!(
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)?;
+    info!("Ursa minor rises above the sky!");
+    info!(
         "Launching with configuration: {:#?}",
         *global_application_config
     );
@@ -297,16 +305,14 @@ fn setup_shutdown_watchers(token: &CancellationToken) -> [JoinHandle<()>; 2] {
                     Ok(mut signal) => {
                         tokio::select! {
                             _ = signal.recv() => {
-                                println!("Terminated! It's time to say goodbye.");
+                                info!("Terminated! It's time to say goodbye.");
                                 shutdown.cancel()
                             }
                             _ = shutdown.cancelled() => {}
                         }
                     }
                     Err(_) => {
-                        eprintln!(
-                        "Could not set SIGTERM handler. Expect things to get a bit dicey on exit."
-                    );
+                        warn!("Could not set SIGTERM handler. Expect things to get a bit dicey on exit.");
                     }
                 }
             })
@@ -315,7 +321,7 @@ fn setup_shutdown_watchers(token: &CancellationToken) -> [JoinHandle<()>; 2] {
             let shutdown = token.clone();
             tokio::spawn(async move {
                 if let Err(_) = tokio::signal::ctrl_c().await {
-                    eprintln!(
+                    error!(
                         "Could not set CTRL+C handler. Expect things to get a bit dicey on exit."
                     );
                 } else {

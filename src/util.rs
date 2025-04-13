@@ -19,7 +19,7 @@ use hyper::http::request::Builder;
 use hyper::Uri;
 use influxdb::Timestamp;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Formatter, Write};
 use std::ops::{Add, Deref, DerefMut, Sub};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -60,8 +60,14 @@ impl<T, const L: &'static str> DerefMut for Obscure<T, L> {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
 pub struct MillisecondTimestamp(pub u64);
+
+impl Debug for MillisecondTimestamp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("https://time.is/{}", self.0))
+    }
+}
 
 impl From<MillisecondTimestamp> for Timestamp {
     fn from(value: MillisecondTimestamp) -> Self {
@@ -105,11 +111,7 @@ impl From<SystemTime> for MillisecondTimestamp {
 impl MillisecondTimestamp {
     pub fn wait_time_or_zero(&self) -> Duration {
         let now = Self::now().unwrap();
-        if now >= *self {
-            Duration::ZERO
-        } else {
-            *self - now
-        }
+        Duration::from_millis(self.0.saturating_sub(now.0))
     }
 
     pub fn now() -> anyhow::Result<Self> {

@@ -15,6 +15,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -132,6 +133,7 @@ impl Auction {
     }
 }
 
+#[tracing::instrument]
 async fn request_ah_page(page_number: u32) -> anyhow::Result<AuctionPage> {
     let args = [("page", format!("{page_number}"))];
     let url = Url::parse_with_params("https://api.hypixel.net/v2/skyblock/auctions", args)?;
@@ -140,23 +142,12 @@ async fn request_ah_page(page_number: u32) -> anyhow::Result<AuctionPage> {
         .method(Method::GET)
         // .header("API-Key", &global_application_config.hypixel_token.0)
         .body(Body::empty())?;
-    println!("Requesting page {page_number}");
-    let t = Instant::now();
     let response = global_application_config.client.request(request).await?;
     if response.status() == StatusCode::NOT_FOUND {
         return Ok(AuctionPage::default());
     }
     let buffer = hyper::body::to_bytes(response.into_body()).await?;
-    println!(
-        "Request for page {page_number} took {} seconds.",
-        (Instant::now() - t).as_secs_f32()
-    );
-    let t = Instant::now();
     let page: AuctionPage = serde_json::from_slice(&buffer)?;
-    println!(
-        "JSON Parse for page {page_number} took {} seconds.",
-        (Instant::now() - t).as_secs_f32()
-    );
     Ok(page)
 }
 /// Returns the timestamp that this update was processed
@@ -179,12 +170,12 @@ async fn item_ah_scan_fallible(
             .buffer_unordered(8)
             .collect::<Vec<_>>()
             .await;
-    println!("Web requests completed");
+    info!("Web requests completed");
     for page in pages {
         let page = page?;
         all_prices.extend(process_page(&page, last_full_scan).await?.into_iter());
     }
-    println!("Prices aggregated.");
+    info!("Prices aggregated.");
 
     update_prices(&all_prices).await?;
     Ok(initial_page
@@ -222,7 +213,7 @@ async fn update_prices(all_prices: &[(impl AsRef<[S]>, f64)]) -> anyhow::Result<
         })
         .collect();
     let res = influx.query(readings).await?;
-    println!("Prices updated: {res}");
+    info!("Prices updated in influx: {res}");
     Ok(())
 }
 
@@ -245,10 +236,10 @@ async fn process_page(
                 }
             }
             Err(err) => {
-                eprintln!(
-                    "Could not parse item with auction id {}: {:#}; {:?}",
+                error!(
+                    %err,
+                    "Could not parse item with auction id {}: {:?}",
                     auction.uuid,
-                    err,
                     auction.raw_nbt().await
                 );
             }
@@ -273,38 +264,40 @@ async fn item_ah_scan(last_full_scan: &mut Option<MillisecondTimestamp>) -> Dura
     match item_ah_scan_fallible(*last_full_scan).await {
         Ok(timestamp) => {
             *last_full_scan = Some(timestamp);
-            let d = Duration::from_secs(65);
+            let d = Duration::from_secs(70); // 60 seconds update interval + 10 seconds lenience
             let w = timestamp + d;
             let c = w.wait_time_or_zero();
-            println!(
+            debug!(
                 "Calculated wait. Ts: {timestamp:?} + {d:?} = {w:?}. Wait: {c:?}. Now: {:?}",
                 MillisecondTimestamp::now()
             );
             c
         }
         Err(er) => {
-            eprintln!("Encountered error during scanning {er:#}");
+            error!(%er, "Encountered error during scanning",);
             Duration::from_secs(30)
         }
     }
 }
 
 async fn loop_body(cancellation_token: CancellationToken) {
-    println!("Auction house collection loop started.");
+    info!("Auction house collection loop started.");
+    debug!("Debug logging is enabled.");
     let mut wait_time = Duration::ZERO;
     let mut last_full_scan = None;
     loop {
         tokio::select! {
             _ = cancellation_token.cancelled() => {
-                println!("Exiting ah loop");
+                info!("Exiting ah loop");
                 return
             }
             _ = tokio::time::sleep(wait_time) => {
+                info!("Waited {wait_time:?} for next loop")
             }
         }
         tokio::select! {
             _ = cancellation_token.cancelled() => {
-                println!("Exiting ah loop during eval");
+                warn!("Exiting ah loop during eval");
                 return
             }
               it = item_ah_scan(&mut last_full_scan) => {
