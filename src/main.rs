@@ -29,6 +29,7 @@ use crate::meta::respond_to_meta;
 use crate::util::{MillisecondTimestamp, Obscure};
 use anyhow::Context as _;
 use clap::Parser;
+use futures::SinkExt;
 use hmac::digest::KeyInit;
 use hmac::Hmac;
 use hyper::client::HttpConnector;
@@ -39,6 +40,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+use tracing::instrument::WithSubscriber;
 
 pub mod hypixel;
 pub mod meta;
@@ -253,10 +255,13 @@ async fn amain() -> anyhow::Result<()> {
 }
 
 async fn run_server() -> anyhow::Result<()> {
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+    use tracing_subscriber::layer::SubscriberExt;
+    let terminal_subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+        .finish()
+        .with(tracing_tracy::TracyLayer::default());
+
+    tracing::subscriber::set_global_default(terminal_subscriber)?;
     info!("Ursa minor rises above the sky!");
     info!(
         "Launching with configuration: {:#?}",

@@ -21,6 +21,9 @@
         cargo = rustToolchain;
         rustc = rustToolchain;
       };
+      rustWithSrc = rustToolchain.override {
+        extensions = ["rust-analyzer" "rust-src"];
+      };
       deps = [pkgs.openssl];
     in
       with pkgs; {
@@ -34,7 +37,7 @@
         };
         devShells.default = mkShell {
           buildInputs =
-            [pkg-config rustToolchain rust-analyzer sccache cargo-make]
+            [pkg-config rustWithSrc sccache cargo-make]
             ++ deps;
 
           shellHook = ''

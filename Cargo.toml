@@ -19,6 +19,7 @@ futures = "0.3.31"
 simdnbt = "0.7.1"
 tokio-util = "0.7.14"
 tracing = "0.1.41"
+tracing-tracy = "0.11.4"
 
 [dependencies.tracing-subscriber]
 version = "0.3.19"

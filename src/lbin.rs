@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, span, warn, Level};
 use url::Url;
 use uuid::Uuid;
 
@@ -96,6 +96,7 @@ impl Auction {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn item_bytes(&self) -> anyhow::Result<A<u8>> {
         let base64_decoded = base64::engine::general_purpose::STANDARD.decode(
             self.item_bytes_compressed
@@ -105,6 +106,7 @@ impl Auction {
 
         Ok(base64_decoded.into())
     }
+    #[tracing::instrument(skip_all)]
     pub async fn raw_nbt(&self) -> anyhow::Result<BaseNbt> {
         let mut ungzipped = Vec::new();
         let input = self.item_bytes()?;
@@ -151,6 +153,7 @@ async fn request_ah_page(page_number: u32) -> anyhow::Result<AuctionPage> {
     Ok(page)
 }
 /// Returns the timestamp that this update was processed
+#[tracing::instrument]
 async fn item_ah_scan_fallible(
     // TODO: inherit cancellation token
     last_full_scan: Option<MillisecondTimestamp>,
@@ -217,6 +220,7 @@ async fn update_prices(all_prices: &[(impl AsRef<[S]>, f64)]) -> anyhow::Result<
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 async fn process_page(
     page: &AuctionPage,
     last_full_scan: Option<MillisecondTimestamp>,
@@ -280,6 +284,7 @@ async fn item_ah_scan(last_full_scan: &mut Option<MillisecondTimestamp>) -> Dura
     }
 }
 
+#[tracing::instrument(skip_all)]
 async fn loop_body(cancellation_token: CancellationToken) {
     info!("Auction house collection loop started.");
     debug!("Debug logging is enabled.");
