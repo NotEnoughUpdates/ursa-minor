@@ -20,8 +20,9 @@
 #![allow(incomplete_features)]
 extern crate core;
 
+use std::str::FromStr as _;
 use std::env;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use crate::hypixel::Rule;
@@ -67,6 +68,7 @@ pub struct RequestContext {
 pub struct GlobalApplicationContext {
     client: Client<HttpsConnector<HttpConnector>>,
     hypixel_token: Obscure<String>,
+    address: IpAddr,
     port: u16,
     rules: Vec<Rule>,
     allow_anonymous: bool,
@@ -173,6 +175,9 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
                 })
         })
         .collect::<Result<Vec<Rule>, _>>()?;
+    let address = IpAddr::from_str(&config_var("ADDRESS")
+        .unwrap_or("172.0.0.1".to_owned()))
+        .with_context(|| "Could not parse bind address at URSA_ADDRESS")?;
     let port = config_var("PORT")?
         .parse::<u16>()
         .with_context(|| "Could not parse port at URSA_PORT")?;
@@ -191,6 +196,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
     let rate_limit_bucket = config_var("RATE_LIMIT_BUCKET")?.parse::<u64>()?;
     Ok(GlobalApplicationContext {
         client,
+        address,
         port,
         hypixel_token: Obscure(hypixel_token),
         rules,
@@ -267,7 +273,7 @@ async fn run_server() -> anyhow::Result<()> {
         "Launching with configuration: {:#?}",
         *global_application_config
     );
-    let addr = SocketAddr::from(([127, 0, 0, 1], global_application_config.port));
+    let addr = SocketAddr::from((global_application_config.address, global_application_config.port));
     let redis_client = redis::Client::open(global_application_config.redis_url.clone())?;
     let managed = redis::aio::ConnectionManager::new(redis_client).await?;
     let service = make_service_fn(|_conn| {
