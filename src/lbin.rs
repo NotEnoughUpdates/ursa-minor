@@ -98,11 +98,8 @@ impl Auction {
 
     #[tracing::instrument(skip_all)]
     fn item_bytes(&self) -> anyhow::Result<A<u8>> {
-        let base64_decoded = base64::engine::general_purpose::STANDARD.decode(
-            self.item_bytes_compressed
-                .as_ref()
-                .as_bytes(),
-        )?;
+        let base64_decoded = base64::engine::general_purpose::STANDARD
+            .decode(self.item_bytes_compressed.as_ref().as_bytes())?;
 
         Ok(base64_decoded.into())
     }

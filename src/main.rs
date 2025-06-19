@@ -20,9 +20,9 @@
 #![allow(incomplete_features)]
 extern crate core;
 
-use std::str::FromStr as _;
 use std::env;
 use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr as _;
 use std::time::Duration;
 
 use crate::hypixel::Rule;
@@ -40,8 +40,8 @@ use hyper_tls::HttpsConnector;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
 use tracing::instrument::WithSubscriber;
+use tracing::{error, info, warn};
 
 pub mod hypixel;
 pub mod meta;
@@ -175,8 +175,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
                 })
         })
         .collect::<Result<Vec<Rule>, _>>()?;
-    let address = IpAddr::from_str(&config_var("ADDRESS")
-        .unwrap_or("172.0.0.1".to_owned()))
+    let address = IpAddr::from_str(&config_var("ADDRESS").unwrap_or("172.0.0.1".to_owned()))
         .with_context(|| "Could not parse bind address at URSA_ADDRESS")?;
     let port = config_var("PORT")?
         .parse::<u16>()
@@ -273,7 +272,10 @@ async fn run_server() -> anyhow::Result<()> {
         "Launching with configuration: {:#?}",
         *global_application_config
     );
-    let addr = SocketAddr::from((global_application_config.address, global_application_config.port));
+    let addr = SocketAddr::from((
+        global_application_config.address,
+        global_application_config.port,
+    ));
     let redis_client = redis::Client::open(global_application_config.redis_url.clone())?;
     let managed = redis::aio::ConnectionManager::new(redis_client).await?;
     let service = make_service_fn(|_conn| {
