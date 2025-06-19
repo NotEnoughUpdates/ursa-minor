@@ -205,6 +205,7 @@ fn init_config() -> anyhow::Result<GlobalApplicationContext> {
         default_token_duration: Duration::from_secs(token_lifespan),
         rate_limit_lifespan,
         rate_limit_bucket,
+        #[cfg(feature = "influxdb")]
         influx_url,
     })
 }
