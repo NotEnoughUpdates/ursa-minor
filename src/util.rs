@@ -17,6 +17,7 @@
 use chrono::Utc;
 use hyper::http::request::Builder;
 use hyper::Uri;
+#[cfg(feature = "influxdb")]
 use influxdb::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter, Write};
@@ -69,11 +70,14 @@ impl Debug for MillisecondTimestamp {
     }
 }
 
+#[cfg(feature = "influxdb")]
 impl From<MillisecondTimestamp> for Timestamp {
     fn from(value: MillisecondTimestamp) -> Self {
         chrono::DateTime::<Utc>::from(SystemTime::from(value)).into()
     }
 }
+
+#[cfg(feature = "influxdb")]
 impl From<Timestamp> for MillisecondTimestamp {
     fn from(value: Timestamp) -> Self {
         let datetime: chrono::DateTime<Utc> = value.into();
