@@ -34,6 +34,11 @@
           buildInputs = deps;
           nativeBuildInputs = [pkgs.pkg-config];
           env = {GIT_HASH = self.rev or self.dirtyRev or "nix-dirty";};
+
+          meta = {
+            mainProgram = "ursa-minor";
+            license = lib.licenses.agpl3Only;
+          };
         };
         devShells.default = mkShell {
           buildInputs =
